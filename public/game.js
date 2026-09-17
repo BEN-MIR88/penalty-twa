@@ -7,18 +7,22 @@ if (tg) {
 const socket = io();
 
 // گرفتن اطلاعات کاربر از تلگرام
-const user = tg?.initDataUnsafe?.user || {
+const tgUser = tg?.initDataUnsafe?.user || null;
+const user = tgUser || {
   id: Math.floor(Math.random() * 100000),
   first_name: 'کاربر تستی'
 };
 
-// گرفتن roomId از پارامتر URL (Deep Linking تلگرام)
+// گرفتن roomId از پارامتر URL (از بات با ?room=room_xxx می‌آید)
 const urlParams = new URLSearchParams(window.location.search);
 let currentRoomId = urlParams.get('tgWebAppStartParam') || urlParams.get('room') || null;
 
 let myRole = null; // 'kicker' | 'goalie'
 let myChoice = null;
 let currentRound = 1;
+let iAmHost = false;
+
+const BOT_USERNAME = "penalty_ben_bot";
 
 // عناصر DOM
 const lobbyScreen = document.getElementById('lobby-screen');
@@ -43,39 +47,56 @@ const modal = document.getElementById('result-modal');
 const modalTitle = document.getElementById('modal-title');
 const modalDesc = document.getElementById('modal-desc');
 
-// ۱. شروع یا ورود مستقیم
+// ۱. اگر با لینک دعوت جوین شده، مستقیم به اتاق وصل شو
 if (currentRoomId) {
-  // اگر با لینک جوین شده است
+  joinRoom(currentRoomId);
+}
+
+function joinRoom(roomId) {
   socket.emit('joinRoom', {
-    roomId: currentRoomId,
+    roomId: roomId,
     playerName: user.first_name,
-    playerAvatar: user.photo_url
+    playerAvatar: user.photo_url,
+    playerTgId: user.id
   });
 }
 
 btnCreate.addEventListener('click', () => {
   const generatedRoomId = 'room_' + Math.random().toString(36).substring(2, 8);
   currentRoomId = generatedRoomId;
-  
-  socket.emit('joinRoom', {
-    roomId: generatedRoomId,
-    playerName: user.first_name,
-    playerAvatar: user.photo_url
-  });
+  iAmHost = true;
+
+  joinRoom(generatedRoomId);
 
   createSection.classList.add('hidden');
   waitingSection.classList.remove('hidden');
 
-  // لینک دعوت تحت بات تلگرام
-  const botUsername = "penalty_ben_bot"; // یوزرنیم رباتت
-  const inviteUrl = `https://t.me/${botUsername}/app?startapp=${generatedRoomId}`;
+  // ⭐ لینک دعوت = دیپ‌لینک ربات: دوستت روبات رو استارت می‌کنه و مستقیم میره زمین تو
+  const inviteUrl = `https://t.me/${BOT_USERNAME}?start=${generatedRoomId}`;
   inviteLinkInput.value = inviteUrl;
 });
 
-btnCopy.addEventListener('click', () => {
-  navigator.clipboard.writeText(inviteLinkInput.value);
-  btnCopy.innerText = "کپی شد! ✅";
-  setTimeout(() => btnCopy.innerText = "کپی لینک دعوت", 2000);
+btnCopy.addEventListener('click', async () => {
+  const link = inviteLinkInput.value;
+  try {
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    if (tg && tg.openTelegramLink) {
+      // داخل تلگرام: مستقیم share کن — بهترین راه برای موبایل
+      tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=⚽ بیا پنالتی! ضربه بزن یا دروازه‌بانی کن 🧤`);
+    } else {
+      await navigator.clipboard.writeText(link);
+      btnCopy.innerText = "کپی شد! ✅";
+      setTimeout(() => btnCopy.innerText = "کپی لینک دعوت", 2000);
+    }
+  } catch (e) {
+    // فالبک: سلکت دستی
+    inviteLinkInput.removeAttribute('readonly');
+    inviteLinkInput.select();
+    document.execCommand('copy');
+    inviteLinkInput.setAttribute('readonly', '');
+    btnCopy.innerText = "کپی شد! ✅";
+    setTimeout(() => btnCopy.innerText = "کپی لینک دعوت", 2000);
+  }
 });
 
 // ۲. انتخاب جهت
@@ -85,6 +106,7 @@ targetBtns.forEach(btn => {
     const direction = btn.getAttribute('data-dir');
     myChoice = direction;
 
+    targetBtns.forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
     subStatus.innerText = "حرکت ثبت شد. منتظر انتخاب حریف...";
 
@@ -102,6 +124,8 @@ socket.on('gameStart', ({ room, kicker, goalie, round }) => {
 
   p1Name.innerText = room.players[0].name;
   p2Name.innerText = room.players[1].name;
+  p1Score.innerText = '۰';
+  p2Score.innerText = '۰';
   updateRoles(kicker, goalie, round);
 });
 
@@ -117,19 +141,23 @@ socket.on('roundResult', ({ kickerChoice, goalieChoice, isGoal, scores, round })
   goalkeeper.className = `goalkeeper dive-${goalieChoice}`;
 
   setTimeout(() => {
-    // بروزرسانی اسکوربورد
+    // بروزرسانی اسکوربورد (scoreها با socket.id کلید خورده‌اند)
     const playerIds = Object.keys(scores);
-    p1Score.innerText = scores[playerIds[0]];
-    p2Score.innerText = scores[playerIds[1]];
+    p1Score.innerText = toFa(scores[playerIds[0]]);
+    p2Score.innerText = toFa(scores[playerIds[1]]);
 
     // نمایش مودال
     modal.classList.remove('hidden');
     if (isGoal) {
       modalTitle.innerText = "⚽ گـــل شـــد!";
-      modalDesc.innerText = `پنالتی‌زن جهت (${kickerChoice}) و گلر جهت (${goalieChoice}) را انتخاب کردند.`;
+      modalDesc.innerText = myRole === 'kicker'
+        ? "شوتت وارد دروازه شد! 🔥"
+        : "توپ وارد دروازه شد 😔";
     } else {
       modalTitle.innerText = "🧤 مهـار شـــد!";
-      modalDesc.innerText = `دروازه‌بان دست پنالتی‌زن را خواند و توپ را گرفت!`;
+      modalDesc.innerText = myRole === 'kicker'
+        ? "دروازه‌بان جهت شوتت رو خوند و توپ رو گرفت!"
+        : "آفرین! حدست درست بود و توپ رو گرفتی 🧤";
     }
   }, 600);
 });
@@ -143,14 +171,63 @@ socket.on('nextRound', ({ round, kicker, goalie }) => {
 socket.on('gameOver', ({ winner, players }) => {
   modal.classList.remove('hidden');
   if (winner) {
-    modalTitle.innerText = `🏆 برنده: ${winner.name}`;
-    modalDesc.innerText = `بازی با نتیجه ${players[0].score} - ${players[1].score} به پایان رسید!`;
+    if (winner.id === socket.id) {
+      modalTitle.innerText = "🏆 تو بردی!";
+      modalDesc.innerText = `نتیجه: ${toFa(players[0].score)} - ${toFa(players[1].score)}`;
+    } else {
+      modalTitle.innerText = "😔 باختی!";
+      modalDesc.innerText = `نتیجه: ${toFa(players[0].score)} - ${toFa(players[1].score)}`;
+    }
   } else {
     modalTitle.innerText = "🤝 مساوی!";
-    modalDesc.innerText = `نتیجه برابر ${players[0].score} شد.`;
+    modalDesc.innerText = `نتیجه برابر ${toFa(players[0].score)} شد.`;
   }
 });
 
+// اتصال قطع شد → دوباره وصل شو
+socket.on('disconnect', () => {
+  if (currentRoomId) {
+    subStatus && (subStatus.innerText = "اتصال قطع شد. در حال اتصال مجدد...");
+  }
+});
+
+socket.on('connect', () => {
+  // اگر وسط بازی ریکانکت شدیم، دوباره به اتاق بپیوند
+  if (currentRoomId && myRole) {
+    joinRoom(currentRoomId);
+  }
+});
+
+socket.on('roomRejoined', () => {
+  if (subStatus) subStatus.innerText = "دوباره وصل شدی ✅";
+});
+
+socket.on('playerReconnected', () => {
+  if (subStatus) subStatus.innerText = "حریف برگشت ✅";
+});
+
+socket.on('opponentDisconnected', () => {
+  if (subStatus) subStatus.innerText = "⏳ حریف قطع شد... (۶۰ ثانیه فرصت برگشت)";
+});
+
+socket.on('roomClosed', () => {
+  modalTitle.innerText = "🚪 بازی تعطیل شد";
+  modalDesc.innerText = "حریف دیگه برنگشت.";
+  modal.classList.remove('hidden');
+});
+
+socket.on('roomFull', () => {
+  alert('این اتاق پر است یا بسته شده است.');
+  // برگرد به لابی
+  lobbyScreen.classList.add('active');
+  gameScreen.classList.remove('active');
+});
+
+socket.on('connect_error', () => {
+  if (subStatus) subStatus.innerText = "خطا در اتصال به سرور...";
+});
+
+// توابع کمکی
 function updateRoles(kicker, goalie, round) {
   currentRound = round;
   roundText.innerText = `راند ${round}`;
@@ -171,4 +248,8 @@ function updateRoles(kicker, goalie, round) {
 function resetPitch() {
   ball.className = 'ball';
   goalkeeper.className = 'goalkeeper center';
+}
+
+function toFa(n) {
+  return String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
 }
