@@ -46,6 +46,13 @@ const ball = document.getElementById('ball');
 const modal = document.getElementById('result-modal');
 const modalTitle = document.getElementById('modal-title');
 const modalDesc = document.getElementById('modal-desc');
+const modalEmoji = document.getElementById('modal-emoji');
+const flash = document.getElementById('flash');
+const roleChip = document.getElementById('role-chip');
+const p1Avatar = document.getElementById('p1-avatar');
+const p2Avatar = document.getElementById('p2-avatar');
+const p1Role = document.getElementById('p1-role');
+const p2Role = document.getElementById('p2-role');
 
 // ۱. اگر با لینک دعوت جوین شده، مستقیم به اتاق وصل شو
 if (currentRoomId) {
@@ -124,9 +131,12 @@ socket.on('gameStart', ({ room, kicker, goalie, round }) => {
 
   p1Name.innerText = room.players[0].name;
   p2Name.innerText = room.players[1].name;
+  p1Avatar.innerText = initial(room.players[0].name);
+  p2Avatar.innerText = initial(room.players[1].name);
   p1Score.innerText = '۰';
   p2Score.innerText = '۰';
   updateRoles(kicker, goalie, round);
+  vibrate('medium');
 });
 
 socket.on('opponentMoved', () => {
@@ -141,6 +151,10 @@ socket.on('roundResult', ({ kickerChoice, goalieChoice, isGoal, scores, round })
   goalkeeper.className = `goalkeeper dive-${goalieChoice}`;
 
   setTimeout(() => {
+    // فلاش سبز برای گل، قرمز برای مهار + ویبره
+    flash.className = `flash ${isGoal ? 'goal' : 'save'}`;
+    vibrate(isGoal ? 'heavy' : 'light');
+
     // بروزرسانی اسکوربورد (scoreها با socket.id کلید خورده‌اند)
     const playerIds = Object.keys(scores);
     p1Score.innerText = toFa(scores[playerIds[0]]);
@@ -149,12 +163,14 @@ socket.on('roundResult', ({ kickerChoice, goalieChoice, isGoal, scores, round })
     // نمایش مودال
     modal.classList.remove('hidden');
     if (isGoal) {
-      modalTitle.innerText = "⚽ گـــل شـــد!";
+      modalEmoji.innerText = '⚽';
+      modalTitle.innerText = "گـــل شـــد!";
       modalDesc.innerText = myRole === 'kicker'
         ? "شوتت وارد دروازه شد! 🔥"
         : "توپ وارد دروازه شد 😔";
     } else {
-      modalTitle.innerText = "🧤 مهـار شـــد!";
+      modalEmoji.innerText = '🧤';
+      modalTitle.innerText = "مهـار شـــد!";
       modalDesc.innerText = myRole === 'kicker'
         ? "دروازه‌بان جهت شوتت رو خوند و توپ رو گرفت!"
         : "آفرین! حدست درست بود و توپ رو گرفتی 🧤";
@@ -164,6 +180,7 @@ socket.on('roundResult', ({ kickerChoice, goalieChoice, isGoal, scores, round })
 
 socket.on('nextRound', ({ round, kicker, goalie }) => {
   modal.classList.add('hidden');
+  flash.className = 'flash';
   resetPitch();
   updateRoles(kicker, goalie, round);
 });
@@ -172,14 +189,19 @@ socket.on('gameOver', ({ winner, players }) => {
   modal.classList.remove('hidden');
   if (winner) {
     if (winner.id === socket.id) {
-      modalTitle.innerText = "🏆 تو بردی!";
+      modalEmoji.innerText = '🏆';
+      modalTitle.innerText = "تو بردی!";
       modalDesc.innerText = `نتیجه: ${toFa(players[0].score)} - ${toFa(players[1].score)}`;
+      vibrate('heavy');
     } else {
-      modalTitle.innerText = "😔 باختی!";
+      modalEmoji.innerText = '😔';
+      modalTitle.innerText = "باختی!";
       modalDesc.innerText = `نتیجه: ${toFa(players[0].score)} - ${toFa(players[1].score)}`;
+      vibrate('light');
     }
   } else {
-    modalTitle.innerText = "🤝 مساوی!";
+    modalEmoji.innerText = '🤝';
+    modalTitle.innerText = "مساوی!";
     modalDesc.innerText = `نتیجه برابر ${toFa(players[0].score)} شد.`;
   }
 });
@@ -234,20 +256,59 @@ function updateRoles(kicker, goalie, round) {
   myChoice = null;
   targetBtns.forEach(b => b.classList.remove('selected'));
 
-  if (socket.id === kicker.id) {
-    myRole = 'kicker';
-    roleStatus.innerText = "👟 نقش: پنالتی‌زن (شوت بزن)";
+  const iAmKicker = socket.id === kicker.id;
+  myRole = iAmKicker ? 'kicker' : 'goalie';
+
+  // رنگ و ایموجی چیپ نقش پایین صفحه
+  if (iAmKicker) {
+    roleChip.innerText = '👟';
+    roleChip.classList.remove('goalie');
+    roleStatus.innerText = "نقش: پنالتی‌زن";
     subStatus.innerText = "یک گوشه از دروازه را برای شوت انتخاب کن";
   } else {
-    myRole = 'goalie';
-    roleStatus.innerText = "🧤 نقش: دروازه‌بان (مهار کن)";
+    roleChip.innerText = '🧤';
+    roleChip.classList.add('goalie');
+    roleStatus.innerText = "نقش: دروازه‌بان";
     subStatus.innerText = "حدس بزن شوت به کدوم سمت میاد و شیرجه بزن";
+  }
+
+  // تگ نقش روی اسکوربورد (راند ۱: پ1 شوت‌زن / راند ۲ برعکس)
+  const p1IsKicker = room_has(roomPlayersRef, kicker.id);
+  if (p1IsKicker) {
+    p1Role.innerText = '👟';
+    p2Role.innerText = '🧤';
+  } else {
+    p1Role.innerText = '🧤';
+    p2Role.innerText = '👟';
   }
 }
 
+// هلپر کوچک برای چک عضویت
+let roomPlayersRef = [];
+const _origGameStart = socket.listeners('gameStart')[0];
+socket.off('gameStart', _origGameStart);
+socket.on('gameStart', (data) => {
+  roomPlayersRef = data.room.players.map(p => p.id);
+  _origGameStart(data);
+});
+function room_has(list, id) { return list.includes(id); }
+
 function resetPitch() {
   ball.className = 'ball';
-  goalkeeper.className = 'goalkeeper center';
+  goalkeeper.className = 'goalkeeper';
+  flash.className = 'flash';
+}
+
+function initial(name) {
+  return (name || '؟').trim().charAt(0);
+}
+
+function vibrate(style) {
+  try {
+    if (tg && tg.HapticFeedback) {
+      tg.HapticFeedback.impactOccurred(style);
+    }
+  } catch (e) {}
 }
 
 function toFa(n) {

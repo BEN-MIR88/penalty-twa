@@ -14,9 +14,14 @@
     
     <!-- لابی / صفحه انتظار -->
     <div id="lobby-screen" class="screen active">
-      <div class="glass-card">
-        <h1 class="glow-title">⚽ ضربات پنالتی</h1>
-        <p class="subtitle">دوئل آنلاین ۱ به ۱</p>
+      <div class="lobby-bg">
+        <div class="glow glow-1"></div>
+        <div class="glow glow-2"></div>
+      </div>
+      <div class="glass-card lobby-card">
+        <div class="lobby-logo">⚽</div>
+        <h1 class="glow-title">ضربات پنالتی</h1>
+        <p class="subtitle">دوئل آنلاین ۱ به ۱ — شوت بزن یا دروازه‌بانی کن</p>
         
         <div id="create-section">
           <button id="btn-create" class="btn-primary">ایجاد مسابقه جدید</button>
@@ -24,10 +29,10 @@
 
         <div id="waiting-section" class="hidden">
           <div class="loader"></div>
-          <p>در انتظار رقیب...</p>
+          <p class="waiting-text">در انتظار حریف...</p>
           <div class="invite-box">
             <input type="text" id="invite-link" readonly>
-            <button id="btn-copy" class="btn-secondary">کپی لینک دعوت</button>
+            <button id="btn-copy" class="btn-secondary">📤 ارسال لینک به دوستت</button>
           </div>
         </div>
       </div>
@@ -35,56 +40,94 @@
 
     <!-- زمین بازی -->
     <div id="game-screen" class="screen">
+      <div class="game-bg"></div>
+
       <!-- هدر و اسکوربورد -->
       <div class="scoreboard glass-panel">
         <div class="player p1">
-          <span id="p1-name" class="name">بازیکن ۱</span>
+          <div id="p1-avatar" class="avatar">پ</div>
+          <div class="player-meta">
+            <span id="p1-name" class="name">بازیکن ۱</span>
+            <span class="role-tag kicker-tag" id="p1-role">👟</span>
+          </div>
           <span id="p1-score" class="score">۰</span>
         </div>
         <div class="round-badge">
           <span id="round-text">راند ۱</span>
         </div>
         <div class="player p2">
-          <span id="p2-name" class="name">بازیکن ۲</span>
           <span id="p2-score" class="score">۰</span>
+          <div class="player-meta">
+            <span id="p2-name" class="name">بازیکن ۲</span>
+            <span class="role-tag goalie-tag" id="p2-role">🧤</span>
+          </div>
+          <div id="p2-avatar" class="avatar">ب</div>
         </div>
       </div>
 
-      <!-- استادیوم و تیرک دروازه -->
+      <!-- استادیوم -->
       <div class="stadium">
-        <div class="goal-post">
-          <div class="crossbar"></div>
-          <div class="net-grid"></div>
-          
-          <!-- دروازه‌بان -->
-          <div id="goalkeeper" class="goalkeeper center">🧤</div>
-
-          <!-- دکمه‌های هدف‌گیری روی دروازه -->
-          <div class="target-zones">
-            <button class="target-btn" data-dir="left"><span>چپ</span></button>
-            <button class="target-btn" data-dir="center"><span>وسط</span></button>
-            <button class="target-btn" data-dir="right"><span>راست</span></button>
-          </div>
+        <!-- آسمان و جایگاه تماشاچی‌ها -->
+        <div class="stands">
+          <div class="crowd"></div>
+          <div class="stand-shade"></div>
         </div>
 
-        <!-- توپ -->
-        <div id="ball" class="ball">⚽</div>
+        <!-- چمن -->
+        <div class="pitch">
+          <div class="pitch-stripes"></div>
+          <div class="penalty-box"></div>
+          <div class="penalty-arc"></div>
+
+          <!-- دروازه -->
+          <div class="goal-post">
+            <div class="crossbar"></div>
+            <div class="net-grid"></div>
+            <div class="net-shade"></div>
+
+            <!-- دروازه‌بان -->
+            <div id="goalkeeper" class="goalkeeper">
+              <div class="keeper-body"></div>
+              <div class="keeper-glove g-left"></div>
+              <div class="keeper-glove g-right"></div>
+            </div>
+
+            <!-- دکمه‌های هدف‌گیری روی دروازه -->
+            <div class="target-zones">
+              <button class="target-btn" data-dir="left"><span>چپ</span></button>
+              <button class="target-btn" data-dir="center"><span>وسط</span></button>
+              <button class="target-btn" data-dir="right"><span>راست</span></button>
+            </div>
+          </div>
+
+          <!-- توپ واقعی (CSS) -->
+          <div id="ball" class="ball">
+            <div class="ball-shadow"></div>
+          </div>
+        </div>
       </div>
 
       <!-- وضعیت نوبت و راهنما -->
       <div class="action-panel glass-panel">
-        <h3 id="role-status">نقش شما: در حال بارگذاری...</h3>
-        <p id="sub-status">یکی از جهات دروازه را انتخاب کنید</p>
+        <div id="role-chip" class="role-chip">⚽</div>
+        <div class="action-texts">
+          <h3 id="role-status">نقش شما: در حال بارگذاری...</h3>
+          <p id="sub-status">یکی از جهات دروازه را انتخاب کنید</p>
+        </div>
       </div>
     </div>
 
     <!-- پاپ‌آپ نتیجه راند / برد و باخت -->
     <div id="result-modal" class="modal hidden">
       <div class="modal-content glass-card">
+        <div id="modal-emoji" class="modal-emoji">⚽</div>
         <h2 id="modal-title">گل شد! 🔥</h2>
         <p id="modal-desc">شوت شما دور از دست گلر وارد دروازه شد.</p>
       </div>
     </div>
+
+    <!-- فلاش رنگی گل / مهار -->
+    <div id="flash" class="flash"></div>
 
   </div>
 

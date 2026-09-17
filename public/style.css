@@ -4,10 +4,14 @@
   --primary: #00f2fe;
   --secondary: #4facfe;
   --accent: #ff007f;
-  --bg-dark: #080d1a;
+  --success: #22ff88;
+  --danger: #ff4655;
+  --bg-dark: #070b16;
   --text: #ffffff;
   --glass: rgba(255, 255, 255, 0.07);
   --glass-border: rgba(255, 255, 255, 0.15);
+  --grass-1: #0e7a3d;
+  --grass-2: #0c6b36;
 }
 
 * {
@@ -51,7 +55,7 @@ body {
   flex-direction: column;
 }
 
-/* Glassmorphism Classes */
+/* ===== Glassmorphism ===== */
 .glass-card {
   background: var(--glass);
   backdrop-filter: blur(16px);
@@ -70,25 +74,82 @@ body {
   border-radius: 16px;
 }
 
-/* لابی */
+/* ===== لابی ===== */
 #lobby-screen {
   align-items: center;
   justify-content: center;
   padding: 20px;
 }
 
+.lobby-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.5;
+  animation: float 6s ease-in-out infinite alternate;
+}
+
+.glow-1 {
+  width: 260px;
+  height: 260px;
+  background: var(--secondary);
+  top: -60px;
+  right: -60px;
+}
+
+.glow-2 {
+  width: 220px;
+  height: 220px;
+  background: var(--accent);
+  bottom: -40px;
+  left: -50px;
+  animation-delay: 2s;
+}
+
+@keyframes float {
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(24px) scale(1.08); }
+}
+
+.lobby-card {
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.lobby-logo {
+  font-size: 4rem;
+  margin-bottom: 6px;
+  animation: bounce 2s ease-in-out infinite;
+  filter: drop-shadow(0 6px 18px rgba(0, 242, 254, 0.35));
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-10px) rotate(8deg); }
+}
+
 .glow-title {
-  font-size: 2.2rem;
+  font-size: 2rem;
   font-weight: 900;
   background: linear-gradient(45deg, var(--primary), var(--accent));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   margin-bottom: 8px;
 }
 
 .subtitle {
   color: #a0aec0;
-  margin-bottom: 24px;
+  margin-bottom: 26px;
+  font-size: 0.95rem;
 }
 
 .btn-primary, .btn-secondary {
@@ -96,16 +157,17 @@ body {
   outline: none;
   cursor: pointer;
   font-weight: 700;
-  border-radius: 12px;
+  border-radius: 14px;
   transition: all 0.2s ease;
 }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--secondary), var(--primary));
-  color: #000;
+  color: #00131a;
   padding: 14px 28px;
-  font-size: 1.1rem;
-  box-shadow: 0 4px 15px rgba(0, 242, 254, 0.4);
+  font-size: 1.05rem;
+  width: 100%;
+  box-shadow: 0 4px 22px rgba(0, 242, 254, 0.35);
 }
 
 .btn-primary:active {
@@ -115,27 +177,38 @@ body {
 .btn-secondary {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
-  padding: 8px 16px;
+  padding: 10px 16px;
   font-size: 0.9rem;
-  margin-top: 8px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.waiting-text {
+  color: #cbd5e0;
+  margin-bottom: 4px;
 }
 
 .invite-box input {
   width: 100%;
   padding: 10px;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--glass-border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--primary);
   text-align: center;
   direction: ltr;
-  margin-top: 15px;
+  margin-top: 14px;
+  font-size: 0.85rem;
 }
 
-/* اسکوربورد */
+/* ===== اسکوربورد ===== */
 .scoreboard {
-  margin: 15px;
-  padding: 12px 20px;
+  margin: 12px 15px 0;
+  padding: 10px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -144,19 +217,74 @@ body {
 
 .player {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.player.p2 .player-meta {
+  align-items: flex-end;
 }
 
 .player .name {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #cbd5e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
 }
 
 .player .score {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   font-weight: 900;
   color: var(--primary);
+  line-height: 1;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--secondary), var(--primary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 0.95rem;
+  color: #00131a;
+  flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.player.p2 .avatar {
+  background: linear-gradient(135deg, var(--accent), #ff6aa9);
+}
+
+.role-tag {
+  font-size: 0.7rem;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.kicker-tag {
+  background: rgba(0, 242, 254, 0.15);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+}
+
+.goalie-tag {
+  background: rgba(255, 0, 127, 0.15);
+  border: 1px solid var(--accent);
+  color: var(--accent);
 }
 
 .round-badge {
@@ -164,41 +292,138 @@ body {
   border: 1px solid var(--accent);
   padding: 4px 12px;
   border-radius: 20px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--accent);
   font-weight: 700;
+  flex-shrink: 0;
 }
 
-/* استادیوم و دروازه */
+/* ===== استادیوم ===== */
 .stadium {
   flex: 1;
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  padding-bottom: 20px;
-  perspective: 600px;
+  overflow: hidden;
+  margin-top: 10px;
 }
 
+.game-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, #0a1128 0%, #0d1730 40%, #0a0f1f 100%);
+  z-index: -1;
+}
+
+/* جایگاه تماشاچی‌ها */
+.stands {
+  height: 22%;
+  min-height: 70px;
+  position: relative;
+  background: linear-gradient(to bottom, #131c36 0%, #0e1428 100%);
+  border-bottom: 3px solid rgba(0, 242, 255, 0.15);
+  overflow: hidden;
+}
+
+.crowd {
+  position: absolute;
+  inset: 8px 6px 0;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.22) 1.6px, transparent 2px),
+    radial-gradient(circle, rgba(0,242,254,0.20) 1.6px, transparent 2px),
+    radial-gradient(circle, rgba(255,0,127,0.20) 1.6px, transparent 2px);
+  background-size: 22px 16px, 22px 16px, 22px 16px;
+  background-position: 0 0, 11px 8px, 5px 12px;
+  opacity: 0.8;
+}
+
+.stand-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, transparent 40%, rgba(0,0,0,0.5) 100%);
+}
+
+/* چمن */
+.pitch {
+  flex: 1;
+  position: relative;
+  background: linear-gradient(to bottom, var(--grass-2) 0%, #0a5c30 100%);
+  perspective: 500px;
+  overflow: hidden;
+}
+
+.pitch-stripes {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--grass-1) 0px,
+    var(--grass-1) 34px,
+    var(--grass-2) 34px,
+    var(--grass-2) 68px
+  );
+  transform: scaleY(1.4);
+  transform-origin: top;
+  opacity: 0.85;
+}
+
+/* محوطه جریمه */
+.penalty-box {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 8%;
+  height: 55%;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.penalty-arc {
+  position: absolute;
+  left: 50%;
+  top: 63%;
+  width: 34%;
+  height: 12%;
+  transform: translateX(-50%);
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top: none;
+  border-radius: 0 0 100px 100px;
+}
+
+/* ===== دروازه ===== */
 .goal-post {
-  width: 85%;
-  height: 200px;
-  border: 6px solid #fff;
+  position: absolute;
+  width: 78%;
+  height: 46%;
+  left: 50%;
+  top: 7%;
+  transform: translateX(-50%);
+  border: 5px solid #fff;
   border-bottom: none;
   border-radius: 8px 8px 0 0;
-  position: absolute;
-  top: 15%;
-  box-shadow: 0 0 25px rgba(255, 255, 255, 0.3), inset 0 0 15px rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 0 25px rgba(255, 255, 255, 0.35),
+    inset 0 0 22px rgba(255, 255, 255, 0.18);
+  z-index: 5;
 }
 
 .net-grid {
   width: 100%;
   height: 100%;
-  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.1) 0px, transparent 1px, transparent 15px),
-              repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0px, transparent 1px, transparent 15px);
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.12) 0px, transparent 1px, transparent 14px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0px, transparent 1px, transparent 14px);
 }
 
+.net-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.08) 100%);
+  pointer-events: none;
+}
+
+/* دکمه‌های هدف‌گیری */
 .target-zones {
   position: absolute;
   inset: 0;
@@ -208,95 +433,263 @@ body {
 .target-btn {
   flex: 1;
   background: transparent;
-  border: 1px dashed rgba(0, 242, 254, 0.3);
-  color: rgba(255, 255, 255, 0.6);
+  border: 1px dashed rgba(0, 242, 254, 0.35);
+  color: rgba(255, 255, 255, 0.65);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
+  padding-bottom: 10px;
   cursor: pointer;
-  transition: background 0.2s;
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: background 0.2s, transform 0.1s;
 }
 
-.target-btn:active, .target-btn.selected {
-  background: rgba(0, 242, 254, 0.25);
+.target-btn:active {
+  background: rgba(0, 242, 254, 0.2);
+  transform: scale(0.97);
+}
+
+.target-btn.selected {
+  background: rgba(0, 242, 254, 0.3);
+  border: 1px solid var(--primary);
   color: #fff;
+  box-shadow: inset 0 0 18px rgba(0, 242, 254, 0.35);
 }
 
-/* دروازه‌بان و انیمیشن شیرجه */
+/* دروازه‌بان (figure با CSS) */
 .goalkeeper {
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 3.5rem;
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  z-index: 5;
+  z-index: 6;
+  transition: transform 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+.keeper-body {
+  width: 34px;
+  height: 44px;
+  background: linear-gradient(135deg, #ffb300, #ff8f00);
+  border-radius: 10px 10px 5px 5px;
+  position: relative;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+}
+
+.keeper-body::before {
+  content: '';
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffd9a0;
+  border: 2px solid rgba(0,0,0,0.15);
+}
+
+.keeper-glove {
+  position: absolute;
+  top: 8px;
+  width: 14px;
+  height: 22px;
+  background: #1de9b6;
+  border-radius: 7px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+.g-left  { left: -13px; transform: rotate(20deg); }
+.g-right { right: -13px; transform: rotate(-20deg); }
+
 .goalkeeper.dive-left {
-  transform: translate(-120%, -30px) rotate(-35deg);
+  transform: translate(-165%, -22px) rotate(-38deg);
 }
 
 .goalkeeper.dive-right {
-  transform: translate(20%, -30px) rotate(35deg);
+  transform: translate(65%, -22px) rotate(38deg);
 }
 
 .goalkeeper.dive-center {
-  transform: translate(-50%, -60px);
+  transform: translate(-50%, -46px) scale(1.05);
 }
 
-/* توپ و انیمیشن شوت */
+/* ===== توپ واقعی ===== */
 .ball {
-  font-size: 2.8rem;
-  z-index: 6;
   position: absolute;
-  bottom: 20px;
-  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+  bottom: 7%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
+  border-radius: 50%;
+  z-index: 7;
+  background:
+    radial-gradient(circle at 32% 30%, #ffffff 0%, #f2f2f2 55%, #cfcfcf 100%);
+  box-shadow:
+    inset -3px -4px 8px rgba(0,0,0,0.25),
+    0 4px 10px rgba(0,0,0,0.5);
+  transition: transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.ball::before {
+  content: '⚽';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,0.5));
+}
+
+.ball-shadow {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 30px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  filter: blur(2px);
 }
 
 .ball.shoot-left {
-  transform: translate(-100px, -230px) scale(0.6) rotate(-360deg);
+  transform: translate(-118px, -190px) scale(0.55) rotate(-320deg);
 }
 
 .ball.shoot-center {
-  transform: translate(0px, -250px) scale(0.6) rotate(360deg);
+  transform: translate(0, -215px) scale(0.55) rotate(360deg);
 }
 
 .ball.shoot-right {
-  transform: translate(100px, -230px) scale(0.6) rotate(360deg);
+  transform: translate(118px, -190px) scale(0.55) rotate(320deg);
 }
 
-/* اکشن پنل پایین */
+/* ===== اکشن پنل ===== */
 .action-panel {
-  margin: 15px;
-  padding: 16px;
-  text-align: center;
+  margin: 12px 15px 15px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 10;
+}
+
+.role-chip {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: rgba(0, 242, 254, 0.12);
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.role-chip.goalie {
+  background: rgba(255, 0, 127, 0.12);
+  border-color: rgba(255, 0, 127, 0.4);
+}
+
+.action-texts {
+  min-width: 0;
 }
 
 .action-panel h3 {
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   color: var(--primary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .action-panel p {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #a0aec0;
 }
 
-/* مودال */
+/* ===== مودال ===== */
 .modal {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.82);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   z-index: 100;
+  animation: fadeIn 0.25s ease;
+}
+
+.modal-content {
+  width: 100%;
+  max-width: 320px;
+  animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.4);
+}
+
+.modal-emoji {
+  font-size: 3.4rem;
+  margin-bottom: 8px;
+  animation: bounce 1.6s ease-in-out infinite;
+}
+
+.modal-content h2 {
+  font-size: 1.5rem;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.modal-content p {
+  color: #a0aec0;
+  font-size: 0.92rem;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes popIn {
+  from { transform: scale(0.7); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* ===== فلاش گل / مهار ===== */
+.flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 90;
+}
+
+.flash.goal {
+  animation: flashGoal 0.7s ease;
+}
+
+.flash.save {
+  animation: flashSave 0.7s ease;
+}
+
+@keyframes flashGoal {
+  0%   { opacity: 0; background: rgba(34, 255, 136, 0); }
+  20%  { opacity: 1; background: rgba(34, 255, 136, 0.22); }
+  100% { opacity: 0; background: rgba(34, 255, 136, 0); }
+}
+
+@keyframes flashSave {
+  0%   { opacity: 0; background: rgba(255, 70, 85, 0); }
+  20%  { opacity: 1; background: rgba(255, 70, 85, 0.22); }
+  100% { opacity: 0; background: rgba(255, 70, 85, 0); }
 }
 
 .hidden { display: none !important; }
+
 .loader {
   width: 40px;
   height: 40px;
