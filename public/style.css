@@ -1,0 +1,312 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
+
+:root {
+  --primary: #00f2fe;
+  --secondary: #4facfe;
+  --accent: #ff007f;
+  --bg-dark: #080d1a;
+  --text: #ffffff;
+  --glass: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.15);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Vazirmatn', sans-serif;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: radial-gradient(circle at center, #101c3d 0%, var(--bg-dark) 100%);
+  color: var(--text);
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen {
+  display: none;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.screen.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Glassmorphism Classes */
+.glass-card {
+  background: var(--glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  padding: 24px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.glass-panel {
+  background: rgba(16, 28, 61, 0.65);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+
+/* لابی */
+#lobby-screen {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.glow-title {
+  font-size: 2.2rem;
+  font-weight: 900;
+  background: linear-gradient(45deg, var(--primary), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #a0aec0;
+  margin-bottom: 24px;
+}
+
+.btn-primary, .btn-secondary {
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-weight: 700;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--secondary), var(--primary));
+  color: #000;
+  padding: 14px 28px;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 15px rgba(0, 242, 254, 0.4);
+}
+
+.btn-primary:active {
+  transform: scale(0.96);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.invite-box input {
+  width: 100%;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  color: var(--primary);
+  text-align: center;
+  direction: ltr;
+  margin-top: 15px;
+}
+
+/* اسکوربورد */
+.scoreboard {
+  margin: 15px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.player .name {
+  font-size: 0.85rem;
+  color: #cbd5e0;
+}
+
+.player .score {
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: var(--primary);
+}
+
+.round-badge {
+  background: rgba(255, 0, 127, 0.2);
+  border: 1px solid var(--accent);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* استادیوم و دروازه */
+.stadium {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 20px;
+  perspective: 600px;
+}
+
+.goal-post {
+  width: 85%;
+  height: 200px;
+  border: 6px solid #fff;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  position: absolute;
+  top: 15%;
+  box-shadow: 0 0 25px rgba(255, 255, 255, 0.3), inset 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+.net-grid {
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.1) 0px, transparent 1px, transparent 15px),
+              repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0px, transparent 1px, transparent 15px);
+}
+
+.target-zones {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.target-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px dashed rgba(0, 242, 254, 0.3);
+  color: rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.target-btn:active, .target-btn.selected {
+  background: rgba(0, 242, 254, 0.25);
+  color: #fff;
+}
+
+/* دروازه‌بان و انیمیشن شیرجه */
+.goalkeeper {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 3.5rem;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 5;
+}
+
+.goalkeeper.dive-left {
+  transform: translate(-120%, -30px) rotate(-35deg);
+}
+
+.goalkeeper.dive-right {
+  transform: translate(20%, -30px) rotate(35deg);
+}
+
+.goalkeeper.dive-center {
+  transform: translate(-50%, -60px);
+}
+
+/* توپ و انیمیشن شوت */
+.ball {
+  font-size: 2.8rem;
+  z-index: 6;
+  position: absolute;
+  bottom: 20px;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.ball.shoot-left {
+  transform: translate(-100px, -230px) scale(0.6) rotate(-360deg);
+}
+
+.ball.shoot-center {
+  transform: translate(0px, -250px) scale(0.6) rotate(360deg);
+}
+
+.ball.shoot-right {
+  transform: translate(100px, -230px) scale(0.6) rotate(360deg);
+}
+
+/* اکشن پنل پایین */
+.action-panel {
+  margin: 15px;
+  padding: 16px;
+  text-align: center;
+}
+
+.action-panel h3 {
+  font-size: 1.1rem;
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+
+.action-panel p {
+  font-size: 0.85rem;
+  color: #a0aec0;
+}
+
+/* مودال */
+.modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+}
+
+.hidden { display: none !important; }
+.loader {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--glass-border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 15px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Penalty Shootout Online</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- تلگرام SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- لابی / صفحه انتظار -->
+    <div id="lobby-screen" class="screen active">
+      <div class="glass-card">
+        <h1 class="glow-title">⚽ ضربات پنالتی</h1>
+        <p class="subtitle">دوئل آنلاین ۱ به ۱</p>
+        
+        <div id="create-section">
+          <button id="btn-create" class="btn-primary">ایجاد مسابقه جدید</button>
+        </div>
+
+        <div id="waiting-section" class="hidden">
+          <div class="loader"></div>
+          <p>در انتظار رقیب...</p>
+          <div class="invite-box">
+            <input type="text" id="invite-link" readonly>
+            <button id="btn-copy" class="btn-secondary">کپی لینک دعوت</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- زمین بازی -->
+    <div id="game-screen" class="screen">
+      <!-- هدر و اسکوربورد -->
+      <div class="scoreboard glass-panel">
+        <div class="player p1">
+          <span id="p1-name" class="name">بازیکن ۱</span>
+          <span id="p1-score" class="score">۰</span>
+        </div>
+        <div class="round-badge">
+          <span id="round-text">راند ۱</span>
+        </div>
+        <div class="player p2">
+          <span id="p2-name" class="name">بازیکن ۲</span>
+          <span id="p2-score" class="score">۰</span>
+        </div>
+      </div>
+
+      <!-- استادیوم و تیرک دروازه -->
+      <div class="stadium">
+        <div class="goal-post">
+          <div class="crossbar"></div>
+          <div class="net-grid"></div>
+          
+          <!-- دروازه‌بان -->
+          <div id="goalkeeper" class="goalkeeper center">🧤</div>
+
+          <!-- دکمه‌های هدف‌گیری روی دروازه -->
+          <div class="target-zones">
+            <button class="target-btn" data-dir="left"><span>چپ</span></button>
+            <button class="target-btn" data-dir="center"><span>وسط</span></button>
+            <button class="target-btn" data-dir="right"><span>راست</span></button>
+          </div>
+        </div>
+
+        <!-- توپ -->
+        <div id="ball" class="ball">⚽</div>
+      </div>
+
+      <!-- وضعیت نوبت و راهنما -->
+      <div class="action-panel glass-panel">
+        <h3 id="role-status">نقش شما: در حال بارگذاری...</h3>
+        <p id="sub-status">یکی از جهات دروازه را انتخاب کنید</p>
+      </div>
+    </div>
+
+    <!-- پاپ‌آپ نتیجه راند / برد و باخت -->
+    <div id="result-modal" class="modal hidden">
+      <div class="modal-content glass-card">
+        <h2 id="modal-title">گل شد! 🔥</h2>
+        <p id="modal-desc">شوت شما دور از دست گلر وارد دروازه شد.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
