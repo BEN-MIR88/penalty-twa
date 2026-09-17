@@ -567,9 +567,45 @@ body {
   transform: translate(118px, -190px) scale(0.55) rotate(320deg);
 }
 
+/* ===== دایره‌های ضربه‌ها ===== */
+.dots {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: all 0.3s ease;
+}
+
+.dot.goal {
+  background: var(--success);
+  border-color: var(--success);
+  box-shadow: 0 0 8px rgba(34, 255, 136, 0.7);
+}
+
+.dot.miss {
+  background: var(--danger);
+  border-color: var(--danger);
+  box-shadow: 0 0 8px rgba(255, 70, 85, 0.6);
+}
+
+/* ===== دکمه بازی مجدد ===== */
+.rematch-btn {
+  margin: 0 15px 12px;
+  z-index: 10;
+  background: linear-gradient(135deg, var(--accent), #ff6aa9);
+  color: #fff;
+}
+
 /* ===== اکشن پنل ===== */
 .action-panel {
-  margin: 12px 15px 15px;
+  margin: 12px 15px 0;
   padding: 12px 16px;
   display: flex;
   align-items: center;
