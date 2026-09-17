@@ -14,6 +14,69 @@ app.use(express.static(path.join(__dirname, 'public')));
 // دیتابیس موقت در حافظه (In-Memory Game Rooms)
 const rooms = {};
 
+// شروع ربات تلگرام
+const TelegramBot = require('node-telegram-bot-api');
+const BOT_TOKEN = '8996508732:AAEZU1IanYRb_w5Q0_YETYDKsfkNyvDNWZ8';
+const WEB_APP_URL = 'https://penalty-twa.onrender.com';
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+console.log('🤖 Telegram Bot is running...');
+
+// دستور /start
+bot.onText(/\/, (msg) => {
+  const chatId = msg.chat.id;
+  const firstName = msg.from.first_name || 'بازیکن';
+  
+  const welcomeMessage = `⚽ سلام ${firstName}!\n\nبه بازی **ضربات پنالتی** خوش اومدی! 🎯\n\n🎮 **نحوه بازی:**\n• یک مسابقه جدید بساز\n• لینک دعوت رو برای دوستت بفرست\n• هر کدوم یک بار ضربه بزنید و یک بار دروازه‌بانی کنید\n• برنده کسیه که گل بیشتری بزنه! 🏆`;
+
+  const keyboard = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: '🎮 شروع بازی',
+            web_app: { url: WEB_APP_URL }
+          }
+        ],
+        [
+          {
+            text: '📖 راهنمای بازی',
+            callback_data: 'help'
+          }
+        ]
+      ]
+    }
+  };
+
+  bot.sendMessage(chatId, welcomeMessage, { 
+    parse_mode: 'Markdown',
+    ...keyboard
+  });
+});
+
+// دستور /help
+bot.onText(/\/, (msg) => {
+  const chatId = msg.chat.id;
+  const helpMessage = `📖 **راهنمای بازی پنالتی:**\n\n⚽ **هدف بازی:**\nدو بازیکن به صورت آنلاین مقابل هم بازی می‌کنند.\n\n🔄 **نحوه بازی:**\n1️⃣ بازیکن اول مسابقه می‌سازه و لینک دعوت می‌فرسته\n2️⃣ بازیکن دوم با لینک وارد می‌شه\n3️⃣ راند ۱: بازیکن ۱ ضربه میزنه، بازیکن ۲ دروازه‌بانه\n4️⃣ راند ۲: جابجا میشن\n5️⃣ برنده کسیه که گل بیشتری بزنه! 🏆\n\n🎯 **نحوه انتخاب:**\n• **پنالتی‌زن:** یکی از گوشه‌های دروازه (چپ، وسط، راست) رو انتخاب کن\n• **دروازه‌بان:** حدس بزن توپ به کدوم سمت میاد و شیرجه بزن`;
+
+  bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+});
+
+// مدیریت callback دکمه‌ها
+bot.on('callback_query', (callbackQuery) => {
+  const data = callbackQuery.data;
+  const chatId = callbackQuery.message.chat.id;
+  
+  if (data === 'help') {
+    bot.sendMessage(chatId, `📖 **راهنمای بازی پنالتی:**\n\n⚽ **هدف بازی:**\nدو بازیکن به صورت آنلاین مقابل هم بازی می‌کنند.\n\n🔄 **نحوه بازی:**\n1️⃣ بازیکن اول مسابقه می‌سازه و لینک دعوت می‌فرسته\n2️⃣ بازیکن دوم با لینک وارد می‌شه\n3️⃣ راند ۱: بازیکن ۱ ضربه میزنه، بازیکن ۲ دروازه‌بانه\n4️⃣ راند ۲: جابجا میشن\n5️⃣ برنده کسیه که گل بیشتری بزنه! 🏆\n\n🎯 **نحوه انتخاب:**\n• **پنالتی‌زن:** یکی از گوشه‌های دروازه (چپ، وسط، راست) رو انتخاب کن\n• **دروازه‌بان:** حدس بزن توپ به کدوم سمت میاد و شیرجه بزن`, { parse_mode: 'Markdown' });
+  }
+  
+  bot.answerCallbackQuery(callbackQuery.id);
+});
+
+bot.on('polling_error', (error) => {
+  console.error('Bot polling error:', error.code);
+});
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
