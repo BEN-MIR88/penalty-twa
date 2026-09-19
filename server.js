@@ -14,9 +14,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // دیتابیس موقت در حافظه (In-Memory Game Rooms)
 const rooms = {};
 
-const KICKS_PER_PLAYER = 5;       // هر بازیکن ۵ ضربه میزند
-const ROUND_ANIM_MS = 4500;       // مدت نمایش نتیجه هر ضربه
-const RECONNECT_GRACE_MS = 60000; // فرصت برگشت بعد از قطع شدن
+const KICKS_PER_PLAYER = 5;        // هر بازیکن ۵ ضربه میزند
+const ROUND_ANIM_MS = 4500;        // مدت نمایش نتیجه هر ضربه
+const RECONNECT_GRACE_MS = 60000;  // فرصت برگشت بعد از قطع شدن وسط بازی
+const WAITING_GRACE_MS = 10000;    // فرصت برگشت بعد از قطع شدن در حالت انتظار (رفرش صفحه)
+const ROOM_TTL_MS = 30 * 60 * 1000; // عمر اتاق رهاشده (پاک‌سازی اتاق‌های شبح)
 const VALID_DIRS = ['left', 'center', 'right'];
 
 // شروع ربات تلگرام
@@ -161,29 +163,40 @@ function nextTurn(room) {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // ۱. ساخت یا ورود به اتاق
-  socket.on('joinRoom', ({ roomId, playerName, playerAvatar, playerTgId }) => {
-    if (!roomId || typeof roomId !== 'string') return;
+  // ۱. ساخت مسابقه جدید — فقط صاحب لینک این را می‌فرستد
+  socket.on('createRoom', ({ playerName, playerAvatar, playerTgId }) => {
+    const roomId = 'room_' + Math.random().toString(36).substring(2, 8);
     socket.join(roomId);
 
-    // ایجاد اتاق جدید
-    if (!rooms[roomId]) {
-      rooms[roomId] = {
-        id: roomId,
-        players: [{ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۱', avatar: playerAvatar, score: 0, disconnected: false }],
-        kickerIndex: 0,
-        goalieIndex: null,
-        choices: { kicker: null, goalie: null },
-        turn: 'A',
-        kickNumber: 1,
-        history: [],
-        status: 'waiting'
-      };
-      socket.emit('roomCreated', { roomId, youIndex: 0 });
+    rooms[roomId] = {
+      id: roomId,
+      players: [{ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۱', avatar: playerAvatar, score: 0, disconnected: false }],
+      kickerIndex: 0,
+      goalieIndex: null,
+      choices: { kicker: null, goalie: null },
+      turn: 'A',
+      kickNumber: 1,
+      history: [],
+      status: 'waiting',
+      lastActivity: Date.now()
+    };
+    socket.emit('roomCreated', { roomId, youIndex: 0 });
+  });
+
+  // ۲. ورود به اتاق — فقط با roomId معتبر (لینک دعوت یا ریکانکت)
+  socket.on('joinRoom', ({ roomId, playerName, playerAvatar, playerTgId }) => {
+    if (!roomId || typeof roomId !== 'string') return;
+
+    const room = rooms[roomId];
+
+    // ❗ اتاق وجود ندارد — لینک قدیمی/منقضی. هیچ اتاق شبحی ساخته نمیشود.
+    if (!room) {
+      socket.emit('roomNotFound', { roomId });
       return;
     }
 
-    const room = rooms[roomId];
+    room.lastActivity = Date.now();
+    socket.join(roomId);
 
     // ریکانکت: اول با tgId چک کن، بعد با socket.id
     let rejoinIdx = room.players.findIndex(p => p.tgId && playerTgId != null && p.tgId === String(playerTgId));
@@ -215,7 +228,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ۲. حرکت (شوت یا شیرجه)
+  // ۳. حرکت (شوت یا شیرجه)
   socket.on('makeMove', ({ roomId, direction }) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'playing') return;
@@ -234,6 +247,7 @@ io.on('connection', (socket) => {
       return; // این بازیکن نوبتش نیست!
     }
 
+    room.lastActivity = Date.now();
     socket.to(roomId).emit('opponentMoved');
 
     if (room.choices.kicker && room.choices.goalie) {
@@ -284,7 +298,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ۳. درخواست بازی مجدد
+  // ۴. بازی مجدد
   socket.on('rematch', ({ roomId }) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'finished') return;
@@ -297,35 +311,101 @@ io.on('connection', (socket) => {
     room.kickerIndex = 0;
     room.goalieIndex = 1;
     room.choices = { kicker: null, goalie: null };
+    room.lastActivity = Date.now();
 
     io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
     io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
   });
 
+  // ۵. خروج داوطلب (دکمه بازگشت به لابی)
+  socket.on('leaveRoom', ({ roomId }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    const idx = room.players.findIndex(p => p.id === socket.id);
+    if (idx === -1) return;
+
+    room.players[idx].disconnected = true;
+    socket.leave(roomId);
+
+    if (room.status === 'waiting') {
+      // هنوز کسی نیامده — کمی فرصت بده برگردد (رفرش)، بعد پاک کن
+      setTimeout(() => {
+        const r = rooms[roomId];
+        if (r && r.status === 'waiting' && r.players.every(p => p.disconnected)) {
+          delete rooms[roomId];
+          console.log('Room removed (host left waiting):', roomId);
+        }
+      }, WAITING_GRACE_MS);
+    } else {
+      // وسط بازی رفته — مثل قطع شدن
+      io.to(roomId).emit('opponentDisconnected');
+    }
+  });
+
+  // ۶. قطع شدن اتصال
   socket.on('disconnect', () => {
-    for (const roomId in rooms) {
+    for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
       const idx = room.players.findIndex(p => p.id === socket.id);
-      if (idx !== -1) {
-        room.players[idx].disconnected = true;
+      if (idx === -1) continue;
 
-        if (room.status === 'playing' || room.status === 'finished') {
-          io.to(roomId).emit('opponentDisconnected');
-          setTimeout(() => {
-            const r = rooms[roomId];
-            if (r && r.players.some(p => p.disconnected)) {
-              io.to(roomId).emit('roomClosed');
-              delete rooms[roomId];
-            }
-          }, RECONNECT_GRACE_MS);
-        } else {
-          delete rooms[roomId];
-        }
-        break;
+      room.players[idx].disconnected = true;
+
+      if (room.status === 'waiting') {
+        // ❗ اتاقِ در حال انتظار فوراً پاک نمیشود — شاید رفرش کرده باشد.
+        // اگر تا ۱۰ ثانیه برنگشت، اتاق حذف میشود تا لینک قدیمی به اتاق شبح نخورد.
+        setTimeout(() => {
+          const r = rooms[roomId];
+          if (r && r.status === 'waiting' && r.players.every(p => p.disconnected)) {
+            delete rooms[roomId];
+            console.log('Room removed (waiting, host gone):', roomId);
+          }
+        }, WAITING_GRACE_MS);
+      } else {
+        // وسط بازی یا بعد از پایان — ۶۰ ثانیه فرصت برگشت
+        io.to(roomId).emit('opponentDisconnected');
+        setTimeout(() => {
+          const r = rooms[roomId];
+          if (r && r.players.some(p => p.disconnected)) {
+            io.to(roomId).emit('roomClosed');
+            delete rooms[roomId];
+            console.log('Room removed (player never returned):', roomId);
+          }
+        }, RECONNECT_GRACE_MS);
       }
+      break;
     }
   });
 });
+
+// پاک‌سازی اتاق‌های شبح (رهاشده) — هر ۵ دقیقه
+setInterval(() => {
+  const now = Date.now();
+  for (const roomId of Object.keys(rooms)) {
+    const room = rooms[roomId];
+    const idleFor = now - (room.lastActivity || 0);
+    const everyoneGone = room.players.every(p => p.disconnected);
+
+    if (room.status === 'waiting' && everyoneGone && idleFor > WAITING_GRACE_MS) {
+      delete rooms[roomId];
+      console.log('Ghost waiting room swept:', roomId);
+    } else if (idleFor > ROOM_TTL_MS) {
+      io.to(roomId).emit('roomClosed');
+      delete rooms[roomId];
+      console.log('Stale room swept:', roomId);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// Keep-alive: چون پلن رایگان Render بعد از ۱۵ دقیقه بی‌کاری می‌خوابد،
+// هر ۱۰ دقیقه یک بار خودمان را ping می‌کنیم تا سرویس بیدار بماند
+// و لینک‌های دعوت وسط روز مُرد نشوند.
+const SELF_URL = process.env.SELF_URL || WEB_APP_URL;
+setInterval(() => {
+  http.get(`${SELF_URL}/health`, () => {}).on('error', () => {});
+}, 10 * 60 * 1000);
+
+app.get('/health', (req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: process.uptime() }));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`⚡ Penalty Game running on port ${PORT}`));

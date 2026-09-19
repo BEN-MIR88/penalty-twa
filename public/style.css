@@ -617,11 +617,25 @@ body {
 }
 
 /* ===== دکمه بازی مجدد ===== */
-.rematch-btn {
-  margin: 0 15px 12px;
+.game-actions {
+  margin: 12px 15px 12px;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rematch-btn {
+  margin: 0;
   background: linear-gradient(135deg, var(--accent), #ff6aa9);
   color: #fff;
+}
+
+.leave-btn {
+  margin-top: 0;
+  font-size: 0.85rem;
+  padding: 10px 16px;
+  opacity: 0.85;
 }
 
 /* ===== اکشن پنل ===== */

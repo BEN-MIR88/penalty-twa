@@ -16,19 +16,20 @@ async function run() {
   ]);
   console.log('✅ هر دو وصل شدند');
 
-  const roomId = 'room_test' + Date.now();
   const state = { started: [], room: null };
+  let roomId = null;
 
   host.on('gameStart', d => { state.started.push('host' + d.youIndex); state.room = d.room; });
   guest.on('gameStart', d => { state.started.push('guest' + d.youIndex); state.room = d.room; });
 
-  // اتصال بازیکن اول
-  host.emit('joinRoom', { roomId, playerName: 'Ali', playerTgId: '111' });
+  // ۱. ساخت اتاق با createRoom
+  host.on('roomCreated', d => { roomId = d.roomId; });
+  host.emit('createRoom', { playerName: 'Ali', playerTgId: '111' });
   await wait(300);
-  if (state.started.length !== 0) { console.log('❌ gameStart قبل از بازیکن دوم!'); process.exit(1); }
-  console.log('✅ اتاق ساخته شد، منتظر بازیکن دوم');
+  if (!roomId) { console.log('❌ roomCreated نگرفت!'); process.exit(1); }
+  console.log('✅ اتاق ساخته شد:', roomId);
 
-  // اتصال بازیکن دوم
+  // ۲. بازیکن دوم با joinRoom بیاد — نباید اتاق شبح بسازد
   guest.emit('joinRoom', { roomId, playerName: 'Reza', playerTgId: '222' });
   await wait(300);
   if (state.started.length !== 2) { console.log('❌ gameStart نگرفت:', state.started); process.exit(1); }
@@ -36,6 +37,18 @@ async function run() {
   if (got !== 'guest1,host0') { console.log('❌ youIndex اشتباه:', got); process.exit(1); }
   console.log('✅ بازی شروع شد — host=index0, guest=index1');
 
+  // ۳. لینک قدیمی: joinRoom به اتاق ناموجود → roomNotFound (نه اتاق شبح)
+  const ghost = io(URL, { transports: ['websocket'] });
+  await new Promise(r => ghost.on('connect', r));
+  let notFound = false;
+  ghost.on('roomNotFound', () => { notFound = true; });
+  ghost.emit('joinRoom', { roomId: 'room_expired999', playerName: 'X', playerTgId: '999' });
+  await wait(300);
+  if (!notFound) { console.log('❌ roomNotFound برای لینک قدیمی نگرفت!'); process.exit(1); }
+  console.log('✅ لینک قدیمی → roomNotFound (بدون اتاق شبح)');
+  ghost.close();
+
+  // ۴. بازی کامل
   let roundResult = null;
   let gameOverData = null;
   const hostLog = [];
@@ -44,7 +57,6 @@ async function run() {
   host.on('gameOver', d => { gameOverData = d; });
 
   // شبیه‌سازی کامل ضربه‌ها (بازی ممکن است زودتر تمام شود — برنده زودهنگام)
-  const dirs = ['left', 'center', 'right'];
   for (let round = 0; round < 10; round++) {
     if (gameOverData) break;
     const room = state.room;
@@ -52,7 +64,7 @@ async function run() {
     const kickerSocket = room.kickerIndex === 0 ? host : guest;
     const goalieSocket = room.kickerIndex === 0 ? guest : host;
 
-    // قانون: دو ضربه اول هر بازیکن گل، بقیه مهار → بازی کامل ۱۰ ضربه‌ای و مساوی ۲-۲
+    // قانون: دو ضربه اول هر بازیکن گل، بقیه مهار → بازی کامل و مساوی ۲-۲
     const ki = room.kickerIndex;
     const kicksByKicker = hostLog.filter(h => h.kickerIndex === ki).length;
     const wantGoal = kicksByKicker < 2;
@@ -99,7 +111,7 @@ async function run() {
   }
   console.log(`✅ gameOver درست: برنده=${gameOverData.winnerIndex}، نتیجه=${goalsP0}-${goalsP1} ${gameOverData.history.length < 10 ? '(برنده زودهنگام!)' : ''}`);
 
-  // تست بازی مجدد
+  // ۵. بازی مجدد
   const rematchStart = [];
   host.on('gameStart', d => rematchStart.push(d.youIndex));
   host.emit('rematch', { roomId });

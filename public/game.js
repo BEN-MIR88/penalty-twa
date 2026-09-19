@@ -57,6 +57,47 @@ const modalEmoji = document.getElementById('modal-emoji');
 const flash = document.getElementById('flash');
 const btnRematch = document.getElementById('btn-rematch');
 
+// ===== مانا (Persist): اگر وسط لابی/بازی هستیم، بعد از بستن اپ هم حفظ شود =====
+const PERSIST_KEY = 'penalty_room';
+try {
+  const saved = JSON.parse(localStorage.getItem(PERSIST_KEY) || 'null');
+  if (saved && saved.roomId && Date.now() - saved.ts < 2 * 60 * 60 * 1000) {
+    currentRoomId = saved.roomId;
+    // بعد از وصل شدن سوکت، ریکانکت میکنیم (هندلر connect پایین)
+  } else {
+    localStorage.removeItem(PERSIST_KEY);
+  }
+} catch (e) {}
+
+function persistRoom(roomId) {
+  try {
+    if (roomId) localStorage.setItem(PERSIST_KEY, JSON.stringify({ roomId, ts: Date.now() }));
+    else localStorage.removeItem(PERSIST_KEY);
+  } catch (e) {}
+}
+
+// دکمه بازگشت به لابی
+const btnLeave = document.getElementById('btn-leave');
+if (btnLeave) {
+  btnLeave.addEventListener('click', () => {
+    if (currentRoomId) socket.emit('leaveRoom', { roomId: currentRoomId });
+    backToLobby();
+  });
+}
+
+function backToLobby() {
+  currentRoomId = null;
+  myIndex = null;
+  roomState = null;
+  persistRoom(null);
+  lobbyScreen.classList.add('active');
+  gameScreen.classList.remove('active');
+  createSection.classList.remove('hidden');
+  waitingSection.classList.add('hidden');
+  modal.classList.add('hidden');
+  resetPitch();
+}
+
 // ۱. اگر با لینک دعوت جوین شده، مستقیم به اتاق وصل شو
 if (currentRoomId) {
   joinRoom(currentRoomId);
@@ -72,17 +113,18 @@ function joinRoom(roomId) {
 }
 
 btnCreate.addEventListener('click', () => {
-  const generatedRoomId = 'room_' + Math.random().toString(36).substring(2, 8);
-  currentRoomId = generatedRoomId;
-
-  joinRoom(generatedRoomId);
-
+  // ساخت مسابقه جدید: اول اتاق قبلی را ترک کن
+  if (currentRoomId) {
+    socket.emit('leaveRoom', { roomId: currentRoomId });
+  }
   createSection.classList.add('hidden');
   waitingSection.classList.remove('hidden');
-
-  // لینک دعوت = دیپ‌لینک ربات
-  const inviteUrl = `https://t.me/${BOT_USERNAME}?start=${generatedRoomId}`;
-  inviteLinkInput.value = inviteUrl;
+  // roomId را سرور میسازد و در roomCreated برمی‌گرداند
+  socket.emit('createRoom', {
+    playerName: user.first_name,
+    playerAvatar: user.photo_url,
+    playerTgId: String(user.id)
+  });
 });
 
 btnCopy.addEventListener('click', async () => {
@@ -137,15 +179,20 @@ if (btnRematch) {
 
 // ===== ایونت‌های سرور =====
 
-socket.on('roomCreated', ({ roomId }) => {
-  myIndex = 0;
+socket.on('roomCreated', ({ roomId, youIndex }) => {
+  myIndex = youIndex;
   currentRoomId = roomId;
+  persistRoom(roomId);
+  const inviteUrl = `https://t.me/${BOT_USERNAME}?start=${roomId}`;
+  inviteLinkInput.value = inviteUrl;
+  subStatus.innerText = '';
 });
 
 // شروع بازی (برای هر بازیکن جدا فرستاده میشه)
 socket.on('gameStart', ({ room, youIndex }) => {
   myIndex = youIndex;
   roomState = room;
+  persistRoom(room.id);
 
   lobbyScreen.classList.remove('active');
   gameScreen.classList.add('active');
@@ -206,8 +253,7 @@ socket.on('nextTurn', ({ room }) => {
 });
 
 socket.on('gameOver', ({ winnerIndex, scores, history }) => {
-  roomState = roomState || {};
-  roomState.status = 'finished';
+  if (roomState) roomState.status = 'finished';
   renderDots(history);
   updateScores(scores);
   btnRematch && btnRematch.classList.remove('hidden');
@@ -238,21 +284,22 @@ socket.on('gameOver', ({ winnerIndex, scores, history }) => {
 socket.on('roomRejoined', ({ room, youIndex }) => {
   myIndex = youIndex;
   roomState = room;
+  currentRoomId = room.id;
+  persistRoom(room.id);
 
   if (room.status === 'waiting') {
     // اتاق هنوز منتظر بازیکن دوم است — من همون میزبانم
-    currentRoomId = room.id;
     lobbyScreen.classList.add('active');
     gameScreen.classList.remove('active');
     createSection.classList.add('hidden');
     waitingSection.classList.remove('hidden');
-    if (inviteLinkInput && !inviteLinkInput.value) {
+    if (inviteLinkInput) {
       inviteLinkInput.value = `https://t.me/${BOT_USERNAME}?start=${room.id}`;
     }
+    subStatus.innerText = '';
     return;
   }
 
-  currentRoomId = room.id;
   lobbyScreen.classList.remove('active');
   gameScreen.classList.add('active');
   modal.classList.add('hidden');
@@ -283,12 +330,36 @@ socket.on('roomClosed', () => {
   modal.classList.remove('hidden');
   roomState = null;
   myIndex = null;
+  persistRoom(null);
+});
+
+// ❗ لینک قدیمی/منقضی — اتاق دیگر وجود ندارد
+socket.on('roomNotFound', ({ roomId }) => {
+  currentRoomId = null;
+  myIndex = null;
+  roomState = null;
+  persistRoom(null);
+  lobbyScreen.classList.add('active');
+  gameScreen.classList.remove('active');
+  createSection.classList.remove('hidden');
+  waitingSection.classList.add('hidden');
+  modalEmoji.innerText = '⌛';
+  modalTitle.innerText = "اتاق پیدا نشد";
+  modalDesc.innerText = "این لینک منقضی شده. یه مسابقه جدید بساز و لینک تازه بفرست!";
+  modal.classList.remove('hidden');
 });
 
 socket.on('roomFull', () => {
-  alert('این اتاق پر است یا بسته شده است.');
+  currentRoomId = null;
+  myIndex = null;
+  roomState = null;
+  persistRoom(null);
   lobbyScreen.classList.add('active');
   gameScreen.classList.remove('active');
+  modalEmoji.innerText = '🚫';
+  modalTitle.innerText = "اتاق پر است";
+  modalDesc.innerText = "این مسابقه شروع شده یا بسته شده. یه مسابقه جدید بساز!";
+  modal.classList.remove('hidden');
 });
 
 // اتصال دوباره بعد از قطعی: اگر در اتاق بودیم، دوباره بپیوند
