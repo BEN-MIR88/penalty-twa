@@ -215,11 +215,31 @@ body {
   z-index: 10;
 }
 
+/* کارت بازیکنی که نوبتش است بدرخشد */
 .player {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding: 4px 6px;
+  border-radius: 12px;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.player.active-turn {
+  background: rgba(0, 242, 254, 0.1);
+  box-shadow: 0 0 14px rgba(0, 242, 254, 0.25);
+}
+
+/* نشانگر نقش روی آواتار */
+.player.is-kicker .avatar {
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+}
+
+.player.is-goalie .avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(255, 0, 127, 0.5);
 }
 
 .player-meta {
@@ -423,11 +443,12 @@ body {
   pointer-events: none;
 }
 
-/* دکمه‌های هدف‌گیری */
+/* دکمه‌های هدف‌گیری — باید LTR باشد تا «چپ» سمت چپ صفحه بیفتد */
 .target-zones {
   position: absolute;
   inset: 0;
   display: flex;
+  direction: ltr;
 }
 
 .target-btn {

@@ -17,9 +17,10 @@ const user = tgUser || {
 const urlParams = new URLSearchParams(window.location.search);
 let currentRoomId = urlParams.get('tgWebAppStartParam') || urlParams.get('room') || null;
 
-let myRole = null;
+let myIndex = null;   // ایندکس من در آرایه بازیکن‌ها (0 یا 1)
+let myRole = null;    // 'kicker' یا 'goalie'
 let myChoice = null;
-let playerIdsRef = []; // [id پ1, id پ2]
+let roomState = null; // آخرین وضعیت اتاق
 
 const BOT_USERNAME = "penalty_ben_bot";
 const TOTAL_KICKS = 5;
@@ -39,8 +40,9 @@ const p1Score = document.getElementById('p1-score');
 const p2Score = document.getElementById('p2-score');
 const p1Avatar = document.getElementById('p1-avatar');
 const p2Avatar = document.getElementById('p2-avatar');
-const p1Role = document.getElementById('p1-role');
-const p2Role = document.getElementById('p2-role');
+const p1Dots = document.getElementById('dots-p1');
+const p2Dots = document.getElementById('dots-p2');
+const playerCards = [document.querySelector('.player.p1'), document.querySelector('.player.p2')];
 const roundText = document.getElementById('round-text');
 const roleStatus = document.getElementById('role-status');
 const subStatus = document.getElementById('sub-status');
@@ -53,8 +55,6 @@ const modalTitle = document.getElementById('modal-title');
 const modalDesc = document.getElementById('modal-desc');
 const modalEmoji = document.getElementById('modal-emoji');
 const flash = document.getElementById('flash');
-const dotsP1 = document.getElementById('dots-p1');
-const dotsP2 = document.getElementById('dots-p2');
 const btnRematch = document.getElementById('btn-rematch');
 
 // ۱. اگر با لینک دعوت جوین شده، مستقیم به اتاق وصل شو
@@ -67,7 +67,7 @@ function joinRoom(roomId) {
     roomId: roomId,
     playerName: user.first_name,
     playerAvatar: user.photo_url,
-    playerTgId: user.id
+    playerTgId: String(user.id)
   });
 }
 
@@ -106,10 +106,12 @@ btnCopy.addEventListener('click', async () => {
   }
 });
 
-// ۲. انتخاب جهت
+// ۲. انتخاب جهت — ناحیه دکمه‌ها LTR است پس "چپ" واقعاً سمت چپ صفحه است
+// (هر دو بازیکن زمین را از دید پنالتی‌زن می‌بینند، مثل پخش تلویزیونی)
 targetBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     if (myChoice) return;
+    if (roomState && roomState.status !== 'playing') return;
     const direction = btn.getAttribute('data-dir');
     myChoice = direction;
 
@@ -128,27 +130,29 @@ targetBtns.forEach(btn => {
 if (btnRematch) {
   btnRematch.addEventListener('click', () => {
     socket.emit('rematch', { roomId: currentRoomId });
+    btnRematch.classList.add('hidden');
+    subStatus.innerText = "در انتظار حریف برای بازی مجدد...";
   });
 }
 
-// ۳. ایونت‌های سرور
-socket.on('gameStart', ({ room, kicker, goalie }) => {
-  playerIdsRef = [room.players[0].id, room.players[1].id];
+// ===== ایونت‌های سرور =====
+
+socket.on('roomCreated', ({ roomId }) => {
+  myIndex = 0;
+  currentRoomId = roomId;
+});
+
+// شروع بازی (برای هر بازیکن جدا فرستاده میشه)
+socket.on('gameStart', ({ room, youIndex }) => {
+  myIndex = youIndex;
+  roomState = room;
 
   lobbyScreen.classList.remove('active');
   gameScreen.classList.add('active');
   modal.classList.add('hidden');
   btnRematch && btnRematch.classList.add('hidden');
 
-  p1Name.innerText = room.players[0].name;
-  p2Name.innerText = room.players[1].name;
-  p1Avatar.innerText = initial(room.players[0].name);
-  p2Avatar.innerText = initial(room.players[1].name);
-  p1Score.innerText = '۰';
-  p2Score.innerText = '۰';
-
-  renderDots([]);
-  updateTurn(room);
+  updateFromRoom(room);
   vibrate('medium');
 });
 
@@ -158,10 +162,8 @@ socket.on('opponentMoved', () => {
   }
 });
 
-socket.on('roundResult', ({ kickerId, isGoal, scores, history }) => {
-  const kickerChoice = arguments[0].kickerChoice;
-  const goalieChoice = arguments[0].goalieChoice;
-
+socket.on('roundResult', ({ kickerIndex, kickerChoice, goalieChoice, isGoal, scores, history, kickNumber }) => {
+  // انیمیشن شوت نسبت به دید پنالتی‌زن
   ball.className = `ball shoot-${kickerChoice}`;
   goalkeeper.className = `goalkeeper dive-${goalieChoice}`;
 
@@ -169,49 +171,56 @@ socket.on('roundResult', ({ kickerId, isGoal, scores, history }) => {
     flash.className = `flash ${isGoal ? 'goal' : 'save'}`;
     vibrate(isGoal ? 'heavy' : 'light');
 
-    const pid = playerIdsRef;
-    p1Score.innerText = toFa(scores[pid[0]] ?? 0);
-    p2Score.innerText = toFa(scores[pid[1]] ?? 0);
+    // اگر توپ گرفته شد، به پایین برگردد
+    if (!isGoal) setTimeout(resetPitch, 900);
 
+    updateScores(scores);
     renderDots(history);
+    roundText.innerText = `ضربه ${toFa(kickNumber)}/${toFa(TOTAL_KICKS)}`;
 
     modal.classList.remove('hidden');
+    const iKicked = kickerIndex === myIndex;
     if (isGoal) {
       modalEmoji.innerText = '⚽';
       modalTitle.innerText = "گـــل شـــد!";
-      modalDesc.innerText = kickerId === socket.id
+      modalDesc.innerText = iKicked
         ? "شوتت وارد دروازه شد! 🔥"
         : "توپ وارد دروازه شد 😔";
     } else {
       modalEmoji.innerText = '🧤';
       modalTitle.innerText = "مهـار شـــد!";
-      modalDesc.innerText = kickerId === socket.id
+      modalDesc.innerText = iKicked
         ? "دروازه‌بان جهت شوتت رو خوند!"
         : "آفرین! توپ رو گرفتی 🧤";
     }
   }, 600);
 });
 
-socket.on('nextTurn', ({ room, kicker, goalie, kickNumber }) => {
+socket.on('nextTurn', ({ room }) => {
   modal.classList.add('hidden');
   flash.className = 'flash';
   resetPitch();
-  updateTurn(room);
+  roomState = room;
+  updateFromRoom(room);
   vibrate('light');
 });
 
-socket.on('gameOver', ({ winner, players, history }) => {
+socket.on('gameOver', ({ winnerIndex, scores, history }) => {
+  roomState = roomState || {};
+  roomState.status = 'finished';
   renderDots(history);
+  updateScores(scores);
   btnRematch && btnRematch.classList.remove('hidden');
+  targetBtns.forEach(b => b.classList.remove('selected'));
 
-  const myScore = players.find(p => p.id === socket.id)?.score ?? 0;
-  const oppScore = players.find(p => p.id !== socket.id)?.score ?? 0;
+  const myScore = scores[myIndex] ?? 0;
+  const oppScore = scores[myIndex === 0 ? 1 : 0] ?? 0;
 
-  if (!winner) {
+  if (winnerIndex === null || winnerIndex === undefined) {
     modalEmoji.innerText = '🤝';
     modalTitle.innerText = "مساوی!";
     modalDesc.innerText = `نتیجه: ${toFa(myScore)} - ${toFa(oppScore)}`;
-  } else if (winner.id === socket.id) {
+  } else if (winnerIndex === myIndex) {
     modalEmoji.innerText = '🏆';
     modalTitle.innerText = "تو بردی!";
     modalDesc.innerText = `نتیجه: ${toFa(myScore)} - ${toFa(oppScore)}`;
@@ -225,33 +234,35 @@ socket.on('gameOver', ({ winner, players, history }) => {
   modal.classList.remove('hidden');
 });
 
-// ریکانکت
-socket.on('roomRejoined', ({ room }) => {
-  // بازیکن وسط بازی ریکانکت شده — کل وضعیت را بازسازی کن
-  playerIdsRef = [room.players[0].id, room.players[1].id];
+// ریکانکت — کل وضعیت بازی بازسازی میشود
+socket.on('roomRejoined', ({ room, youIndex }) => {
+  myIndex = youIndex;
+  roomState = room;
 
   if (room.status === 'waiting') {
+    // اتاق هنوز منتظر بازیکن دوم است — من همون میزبانم
+    currentRoomId = room.id;
     lobbyScreen.classList.add('active');
     gameScreen.classList.remove('active');
-    createSection.classList.remove('hidden');
-    waitingSection.classList.add('hidden');
+    createSection.classList.add('hidden');
+    waitingSection.classList.remove('hidden');
+    if (inviteLinkInput && !inviteLinkInput.value) {
+      inviteLinkInput.value = `https://t.me/${BOT_USERNAME}?start=${room.id}`;
+    }
     return;
   }
 
+  currentRoomId = room.id;
   lobbyScreen.classList.remove('active');
   gameScreen.classList.add('active');
   modal.classList.add('hidden');
+  btnRematch && btnRematch.classList.add('hidden');
 
-  p1Name.innerText = room.players[0].name;
-  p2Name.innerText = room.players[1].name;
-  p1Avatar.innerText = initial(room.players[0].name);
-  p2Avatar.innerText = initial(room.players[1].name);
-  const pid = playerIdsRef;
-  p1Score.innerText = toFa(room.players[0].score ?? 0);
-  p2Score.innerText = toFa(room.players[1].score ?? 0);
-
+  resetPitch();
+  updateScores([room.players[0].score, room.players[1].score]);
   renderDots(room.history);
-  updateTurn(room);
+  roundText.innerText = `ضربه ${toFa(room.kickNumber)}/${toFa(TOTAL_KICKS)}`;
+  updateTurnUI(room);
 
   subStatus.innerText = "دوباره وصل شدی ✅";
 });
@@ -270,6 +281,8 @@ socket.on('roomClosed', () => {
   modalDesc.innerText = "حریف دیگه برنگشت.";
   btnRematch && btnRematch.classList.add('hidden');
   modal.classList.remove('hidden');
+  roomState = null;
+  myIndex = null;
 });
 
 socket.on('roomFull', () => {
@@ -278,8 +291,9 @@ socket.on('roomFull', () => {
   gameScreen.classList.remove('active');
 });
 
+// اتصال دوباره بعد از قطعی: اگر در اتاق بودیم، دوباره بپیوند
 socket.on('connect', () => {
-  if (currentRoomId && playerIdsRef.length) {
+  if (currentRoomId) {
     joinRoom(currentRoomId);
   }
 });
@@ -296,18 +310,48 @@ socket.on('connect_error', () => {
 
 // ===== توابع کمکی =====
 
-function updateTurn(room) {
-  const iAmKicker = room.currentKicker.id === socket.id;
+function updateFromRoom(room) {
+  updateNames(room);
+  updateScores([room.players[0].score, room.players[1].score]);
+  renderDots(room.history);
+  roundText.innerText = `ضربه ${toFa(room.kickNumber)}/${toFa(TOTAL_KICKS)}`;
+  updateTurnUI(room);
+}
+
+function updateNames(room) {
+  p1Name.innerText = room.players[0].name;
+  p2Name.innerText = room.players[1].name;
+  p1Avatar.innerText = initial(room.players[0].name);
+  p2Avatar.innerText = initial(room.players[1].name);
+  if (room.players[0].avatar && p1Avatar.tagName === 'IMG') p1Avatar.src = room.players[0].avatar;
+  if (room.players[1].avatar && p2Avatar.tagName === 'IMG') p2Avatar.src = room.players[1].avatar;
+}
+
+function updateScores(scores) {
+  if (!scores) return;
+  p1Score.innerText = toFa(scores[0] ?? 0);
+  p2Score.innerText = toFa(scores[1] ?? 0);
+}
+
+// برجسته کردن کارت بازیکنی که نوبتش است
+function updateTurnUI(room) {
+  const iAmKicker = room.kickerIndex === myIndex;
   myRole = iAmKicker ? 'kicker' : 'goalie';
   myChoice = null;
   targetBtns.forEach(b => b.classList.remove('selected'));
 
-  roundText.innerText = `ضربه ${toFa(room.kickNumber)}/${toFa(TOTAL_KICKS)}`;
-
   // تگ نقش روی اسکوربورد
-  const p1IsKicker = room.kickerIndex === 0;
-  p1Role.innerText = p1IsKicker ? '👟' : '🧤';
-  p2Role.innerText = p1IsKicker ? '🧤' : '👟';
+  if (playerCards[0] && playerCards[1]) {
+    playerCards[0].classList.toggle('is-kicker', room.kickerIndex === 0);
+    playerCards[0].classList.toggle('is-goalie', room.kickerIndex !== 0);
+    playerCards[1].classList.toggle('is-kicker', room.kickerIndex === 1);
+    playerCards[1].classList.toggle('is-goalie', room.kickerIndex !== 1);
+  }
+
+  // کارت نوبت‌دار بدرخشد
+  playerCards.forEach((card, i) => {
+    if (card) card.classList.toggle('active-turn', room.kickerIndex === i);
+  });
 
   if (iAmKicker) {
     roleChip.innerText = '👟';
@@ -324,19 +368,17 @@ function updateTurn(room) {
 
 // دایره‌های وضعیت ضربه‌ها: سبز=گل، قرمز=نشد، خاکستری=باقی‌مانده
 function renderDots(history) {
-  if (!dotsP1 || !dotsP2) return;
-  const pid = playerIdsRef;
-  if (!pid.length) return;
+  if (!p1Dots || !p2Dots) return;
 
-  [dotsP1, dotsP2].forEach((container, i) => {
+  [p1Dots, p2Dots].forEach((container, i) => {
     container.innerHTML = '';
-    const me = history.filter(h => h.by === pid[i]);
+    const mine = (history || []).filter(h => h.by === i);
 
     for (let k = 0; k < TOTAL_KICKS; k++) {
       const dot = document.createElement('span');
       dot.className = 'dot';
-      if (me[k]) {
-        dot.classList.add(me[k].goal ? 'goal' : 'miss');
+      if (mine[k]) {
+        dot.classList.add(mine[k].goal ? 'goal' : 'miss');
       }
       container.appendChild(dot);
     }

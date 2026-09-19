@@ -17,6 +17,7 @@ const rooms = {};
 const KICKS_PER_PLAYER = 5;       // هر بازیکن ۵ ضربه میزند
 const ROUND_ANIM_MS = 4500;       // مدت نمایش نتیجه هر ضربه
 const RECONNECT_GRACE_MS = 60000; // فرصت برگشت بعد از قطع شدن
+const VALID_DIRS = ['left', 'center', 'right'];
 
 // شروع ربات تلگرام
 const TelegramBot = require('node-telegram-bot-api');
@@ -110,34 +111,35 @@ try {
 function publicRoom(room) {
   return {
     id: room.id,
-    players: room.players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score, disconnected: !!p.disconnected })),
+    players: room.players.map(p => ({ name: p.name, avatar: p.avatar, score: p.score, disconnected: !!p.disconnected })),
     kickerIndex: room.kickerIndex,
     goalieIndex: room.goalieIndex,
-    currentKicker: room.players[room.kickerIndex],
-    currentGoalie: room.players[room.goalieIndex],
     kickNumber: room.kickNumber,          // ضربه چندم از ۵ ضربه‌ی هر تیم
-    turn: room.turn,                      // 'A' یعنی بازیکن اول شوت‌زن است
     totalKicks: KICKS_PER_PLAYER,
-    history: room.history,                // [{by: playerId, goal: bool}]
+    history: room.history,                // [{by: 0|1, goal: bool}]
     status: room.status
   };
 }
 
+// تعداد ضربه‌های زده‌شده‌ی هر بازیکن (بر اساس ایندکس 0 یا 1)
+function kicksTaken(room, idx) {
+  return room.history.filter(h => h.by === idx).length;
+}
+
 // آیا هر دو همه ضربه‌ها را زده‌اند؟
 function allKicksDone(room) {
-  return room.history.filter(h => h.by === room.players[0].id).length >= KICKS_PER_PLAYER &&
-         room.history.filter(h => h.by === room.players[1].id).length >= KICKS_PER_PLAYER;
+  return kicksTaken(room, 0) >= KICKS_PER_PLAYER && kicksTaken(room, 1) >= KICKS_PER_PLAYER;
 }
 
 // آیا بازی از قبل مشخص شده؟ (ریاضی کارت‌ها تمام)
-function earlyWinner(room) {
+function earlyWinnerIndex(room) {
   const s0 = room.players[0].score;
   const s1 = room.players[1].score;
-  const k0 = KICKS_PER_PLAYER - room.history.filter(h => h.by === room.players[0].id).length; // ضربه‌های باقی‌مانده پ1
-  const k1 = KICKS_PER_PLAYER - room.history.filter(h => h.by === room.players[1].id).length;
+  const k0 = KICKS_PER_PLAYER - kicksTaken(room, 0); // ضربه‌های باقی‌مانده پ1
+  const k1 = KICKS_PER_PLAYER - kicksTaken(room, 1); // ضربه‌های باقی‌مانده پ2
 
-  if (s0 > s1 + k1) return room.players[0];
-  if (s1 > s0 + k0) return room.players[1];
+  if (s0 > s1 + k1) return 0;
+  if (s1 > s0 + k0) return 1;
   return null;
 }
 
@@ -161,14 +163,14 @@ io.on('connection', (socket) => {
 
   // ۱. ساخت یا ورود به اتاق
   socket.on('joinRoom', ({ roomId, playerName, playerAvatar, playerTgId }) => {
+    if (!roomId || typeof roomId !== 'string') return;
     socket.join(roomId);
 
+    // ایجاد اتاق جدید
     if (!rooms[roomId]) {
-      // ایجاد اتاق جدید
       rooms[roomId] = {
         id: roomId,
-        players: [{ id: socket.id, tgId: playerTgId, name: playerName || 'Player 1', avatar: playerAvatar, score: 0, disconnected: false }],
-        round: 1,
+        players: [{ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۱', avatar: playerAvatar, score: 0, disconnected: false }],
         kickerIndex: 0,
         goalieIndex: null,
         choices: { kicker: null, goalie: null },
@@ -177,37 +179,37 @@ io.on('connection', (socket) => {
         history: [],
         status: 'waiting'
       };
-      socket.emit('roomCreated', { roomId, role: 'kicker' });
+      socket.emit('roomCreated', { roomId, youIndex: 0 });
       return;
     }
 
     const room = rooms[roomId];
 
-    // ریکانکت با tgId
-    const rejoinIdx = room.players.findIndex(p => p.tgId && playerTgId && p.tgId === playerTgId);
+    // ریکانکت: اول با tgId چک کن، بعد با socket.id
+    let rejoinIdx = room.players.findIndex(p => p.tgId && playerTgId != null && p.tgId === String(playerTgId));
+    if (rejoinIdx === -1) {
+      rejoinIdx = room.players.findIndex(p => p.id === socket.id);
+    }
+
     if (rejoinIdx !== -1) {
+      // بازیکن قبلی برگشته (رفرش صفحه، قطع شدن اینترنت، یا کلیک دوباره)
       room.players[rejoinIdx].id = socket.id;
       room.players[rejoinIdx].disconnected = false;
-      socket.emit('roomRejoined', {
-        room: publicRoom(room),
-        role: rejoinIdx === room.kickerIndex ? 'kicker' : 'goalie'
-      });
-      io.to(roomId).emit('playerReconnected');
+      socket.emit('roomRejoined', { room: publicRoom(room), youIndex: rejoinIdx });
+      socket.to(roomId).emit('playerReconnected');
       return;
     }
 
-    if (room.players.length === 1 && room.players[0].id !== socket.id) {
-      // بازیکن دوم
-      room.players.push({ id: socket.id, tgId: playerTgId, name: playerName || 'Player 2', avatar: playerAvatar, score: 0, disconnected: false });
+    // بازیکن دوم
+    if (room.players.length === 1) {
+      room.players.push({ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۲', avatar: playerAvatar, score: 0, disconnected: false });
       room.goalieIndex = 1;
       room.status = 'playing';
+      room.kickerIndex = 0;
 
-      io.to(roomId).emit('gameStart', {
-        room: publicRoom(room),
-        kicker: room.players[0],
-        goalie: room.players[1],
-        round: 1
-      });
+      // هر بازیکن باید بدونه خودش کدوم بازیکن هست (ایندکس 0 یا 1)
+      io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
+      io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
     } else {
       socket.emit('roomFull');
     }
@@ -217,33 +219,37 @@ io.on('connection', (socket) => {
   socket.on('makeMove', ({ roomId, direction }) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'playing') return;
+    if (!VALID_DIRS.includes(direction)) return;
 
-    const isKicker = socket.id === room.players[room.kickerIndex].id;
-    const isGoalie = socket.id === room.players[room.goalieIndex].id;
+    const kicker = room.players[room.kickerIndex];
+    const goalie = room.players[room.goalieIndex];
 
-    if (isKicker) room.choices.kicker = direction;
-    else if (isGoalie) room.choices.goalie = direction;
-    else return;
+    if (socket.id === kicker.id) {
+      if (room.choices.kicker) return; // جلوگیری از دو بار انتخاب
+      room.choices.kicker = direction;
+    } else if (socket.id === goalie.id) {
+      if (room.choices.goalie) return;
+      room.choices.goalie = direction;
+    } else {
+      return; // این بازیکن نوبتش نیست!
+    }
 
     socket.to(roomId).emit('opponentMoved');
 
     if (room.choices.kicker && room.choices.goalie) {
-      const kicker = room.players[room.kickerIndex];
+      // ⚽ قانون درست: اگه گلر همون جهتی رو که شوت شده رو انتخاب کنه، توپ گرفته میشه
       const isGoal = room.choices.kicker !== room.choices.goalie;
       if (isGoal) kicker.score += 1;
 
-      room.history.push({ by: kicker.id, goal: isGoal });
+      // تاریخچه با ایندکس بازیکن (0 یا 1) ذخیره میشه
+      room.history.push({ by: room.kickerIndex, goal: isGoal });
 
       io.to(roomId).emit('roundResult', {
+        kickerIndex: room.kickerIndex,
         kickerChoice: room.choices.kicker,
         goalieChoice: room.choices.goalie,
         isGoal: isGoal,
-        kickerId: kicker.id,
-        kickerName: kicker.name,
-        scores: {
-          [room.players[0].id]: room.players[0].score,
-          [room.players[1].id]: room.players[1].score
-        },
+        scores: [room.players[0].score, room.players[1].score],
         history: room.history,
         kickNumber: room.kickNumber
       });
@@ -252,33 +258,27 @@ io.on('connection', (socket) => {
 
       setTimeout(() => {
         const r = rooms[roomId];
-        if (!r) return;
+        if (!r || r.status !== 'playing') return;
 
-        const earlyWin = earlyWinner(r);
-        if (allKicksDone(r) || earlyWin) {
+        const earlyWin = earlyWinnerIndex(r);
+        if (allKicksDone(r) || earlyWin !== null) {
           r.status = 'finished';
-          let winner = earlyWin;
-          if (!winner && allKicksDone(r)) {
-            if (r.players[0].score > r.players[1].score) winner = r.players[0];
-            else if (r.players[1].score > r.players[0].score) winner = r.players[1];
+          let winnerIndex = earlyWin;
+          if (winnerIndex === null && allKicksDone(r)) {
+            if (r.players[0].score > r.players[1].score) winnerIndex = 0;
+            else if (r.players[1].score > r.players[0].score) winnerIndex = 1;
           }
 
           io.to(roomId).emit('gameOver', {
-            winner,
-            players: r.players,
+            winnerIndex,
+            scores: [r.players[0].score, r.players[1].score],
             history: r.history
           });
-          // اتاق ۶۰ ثانیه برای ریمچ نگه داشته می‌شود
+          // اتاق ۶۰ ثانیه برای بازی مجدد نگه داشته می‌شود
           setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; }, RECONNECT_GRACE_MS);
         } else {
           nextTurn(r);
-          io.to(roomId).emit('nextTurn', {
-            room: publicRoom(r),
-            kicker: r.players[r.kickerIndex],
-            goalie: r.players[r.goalieIndex],
-            kickNumber: r.kickNumber,
-            turn: r.turn
-          });
+          io.to(roomId).emit('nextTurn', { room: publicRoom(r) });
         }
       }, ROUND_ANIM_MS);
     }
@@ -289,8 +289,8 @@ io.on('connection', (socket) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'finished') return;
 
-    room.status = 'waiting';
-    room.players.forEach(p => { p.score = 0; });
+    room.status = 'playing';
+    room.players.forEach(p => { p.score = 0; p.disconnected = false; });
     room.turn = 'A';
     room.kickNumber = 1;
     room.history = [];
@@ -298,12 +298,8 @@ io.on('connection', (socket) => {
     room.goalieIndex = 1;
     room.choices = { kicker: null, goalie: null };
 
-    io.to(roomId).emit('gameStart', {
-      room: publicRoom(room),
-      kicker: room.players[0],
-      goalie: room.players[1],
-      round: 1
-    });
+    io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
+    io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
   });
 
   socket.on('disconnect', () => {
