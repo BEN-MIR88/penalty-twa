@@ -349,6 +349,38 @@ socket.on('roomNotFound', ({ roomId }) => {
   modal.classList.remove('hidden');
 });
 
+// 🔒 عضویت اجباری در کانال
+socket.on('notMember', () => {
+  currentRoomId = null;
+  myIndex = null;
+  roomState = null;
+  persistRoom(null);
+  lobbyScreen.classList.add('active');
+  gameScreen.classList.remove('active');
+  createSection.classList.remove('hidden');
+  waitingSection.classList.add('hidden');
+  modalEmoji.innerText = '🔒';
+  modalTitle.innerText = "عضو کانال نیستی!";
+  modalDesc.innerText = "برای بازی کردن باید اول عضو کانال بشی. بعد از عضویت، بازی رو دوباره باز کن.";
+  modal.classList.remove('hidden');
+
+  // دکمه موقت عضویت داخل مودال
+  let joinBtn = document.getElementById('btn-join-channel');
+  if (!joinBtn) {
+    joinBtn = document.createElement('button');
+    joinBtn.id = 'btn-join-channel';
+    joinBtn.className = 'btn-primary';
+    joinBtn.style.marginTop = '14px';
+    joinBtn.innerText = '📢 عضویت در کانال';
+    modal.querySelector('.modal-content').appendChild(joinBtn);
+    joinBtn.addEventListener('click', () => {
+      const url = 'https://t.me/shayadmessi';
+      if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+      else window.open(url, '_blank');
+    });
+  }
+});
+
 socket.on('roomFull', () => {
   currentRoomId = null;
   myIndex = null;

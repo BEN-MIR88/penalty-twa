@@ -21,6 +21,11 @@ const WAITING_GRACE_MS = 10000;    // فرصت برگشت بعد از قطع ش�
 const ROOM_TTL_MS = 30 * 60 * 1000; // عمر اتاق رهاشده (پاک‌سازی اتاق‌های شبح)
 const VALID_DIRS = ['left', 'center', 'right'];
 
+// ===== کانال اجباری =====
+// FORCE_CHANNEL=off → چک عضویت کلاً غیرفعال میشود
+const FORCE_CHANNEL = process.env.FORCE_CHANNEL || '@shayadmessi';
+const FORCE_CHANNEL_URL = process.env.FORCE_CHANNEL_URL || 'https://t.me/shayadmessi';
+
 // شروع ربات تلگرام
 const TelegramBot = require('node-telegram-bot-api');
 const BOT_TOKEN = process.env.BOT_TOKEN || '8996508732:AAEZU1IanYRb_w5Q0_YETYDKsfkNyvDNWZ8';
@@ -31,32 +36,69 @@ try {
   bot = new TelegramBot(BOT_TOKEN, { polling: true });
   console.log('🤖 Telegram Bot is running...');
 
-  // /start بدون payload → منو | /start room_xxx → ورود به زمین دوست
-  bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    const firstName = msg.from.first_name || 'بازیکن';
+  // ⌨️ منوی همیشگی: /start همیشه پایین صفحه کنار input دیده میشود
+  bot.setMyCommands([
+    { command: 'start', description: '⚽ شروع بازی' },
+    { command: 'help', description: '📖 راهنمای بازی' }
+  ]).then(() => console.log('⌨️ Bot commands set')).catch(e => console.error('setMyCommands:', e.message));
 
-    const parts = (msg.text || '').split(' ');
-    const payload = parts.length > 1 ? parts[1].trim() : null;
+  // دکمه منو همیشه نمایش داده شود (نه فقط موقع تایپ)
+  bot.setChatMenuButton({ menu_button: { type: 'commands' } }).catch(() => {});
 
+  // ===== چک عضویت کانال =====
+  const membershipCache = new Map(); // tgId -> { ok, ts }
+  const MEMBERSHIP_CACHE_MS = 5 * 60 * 1000;
+  const CHECK_TIMEOUT_MS = 3000; // اگر API تلگرام کند بود، بازی را نبند (fail-open)
+
+  function checkMembership(tgId) {
+    return new Promise((resolve) => {
+      if (FORCE_CHANNEL === 'off' || !bot || !tgId) return resolve(true);
+      const key = String(tgId);
+      const cached = membershipCache.get(key);
+      if (cached && Date.now() - cached.ts < MEMBERSHIP_CACHE_MS) return resolve(cached.ok);
+
+      const apiCall = bot.getChatMember(FORCE_CHANNEL, key).then(m => {
+        const ok = ['creator', 'administrator', 'member', 'restricted'].includes(m.status);
+        membershipCache.set(key, { ok, ts: Date.now() });
+        return ok;
+      }).catch(e => {
+        // اگر ربات ادمین کانال نباشد چک ممکن نیست — بازی را نبند، فقط لاگ کن
+        console.error('getChatMember failed:', e.message);
+        return true;
+      });
+
+      // تایم‌اوت: اگر جواب نیامد، بگذار رد شود (fail-open)
+      Promise.race([
+        apiCall,
+        new Promise(r => setTimeout(() => r(true), CHECK_TIMEOUT_MS))
+      ]).then(resolve);
+    });
+  }
+
+  function forceJoinKeyboard(payload) {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📢 عضویت در کانال', url: FORCE_CHANNEL_URL }],
+          [{ text: '✅ عضو شدم، بررسی کن', callback_data: `check_join${payload ? '|' + payload : ''}` }]
+        ]
+      }
+    };
+  }
+
+  // پیام خوش‌آمد / دکمه ورود به زمین دوست
+  function sendWelcome(chatId, firstName, payload) {
     if (payload && payload.startsWith('room_')) {
-      const keyboard = {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: '🎮 ورود به زمین دوستت',
-                web_app: { url: `${WEB_APP_URL}?room=${payload}` }
-              }
-            ]
-          ]
-        }
-      };
-      bot.sendMessage(chatId,
+      return bot.sendMessage(chatId,
         `⚽ سلام ${firstName}!\n\nبازیکن اول منتظرته! برای شروع بازی روی دکمه زیر بزن 👇`,
-        keyboard
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🎮 ورود به زمین دوستت', web_app: { url: `${WEB_APP_URL}?room=${payload}` } }]
+            ]
+          }
+        }
       );
-      return;
     }
 
     const welcomeMessage = `⚽ سلام ${firstName}!
@@ -68,25 +110,42 @@ try {
 • هر بازیکن ۵ ضربه میزنه (شوت و دروازه‌بانی یکی‌یکی)
 • کی بیشترین گل رو بزنه برنده‌ست! 🏆`;
 
-    const keyboard = {
+    return bot.sendMessage(chatId, welcomeMessage, {
+      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: '🎮 شروع بازی', web_app: { url: WEB_APP_URL } }
-          ],
-          [
-            { text: '📖 راهنمای بازی', callback_data: 'help' }
-          ]
+          [{ text: '🎮 شروع بازی', web_app: { url: WEB_APP_URL } }],
+          [{ text: '📖 راهنمای بازی', callback_data: 'help' }]
         ]
       }
-    };
+    });
+  }
 
-    bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown', ...keyboard });
+  // /start بدون payload → منو | /start room_xxx → ورود به زمین دوست
+  bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const firstName = msg.from.first_name || 'بازیکن';
+
+    const parts = (msg.text || '').split(' ');
+    const payload = parts.length > 1 ? parts[1].trim() : null;
+
+    // 🔒 عضویت اجباری در کانال
+    const isMember = await checkMembership(msg.from.id);
+    if (!isMember) {
+      return bot.sendMessage(chatId,
+        `🔒 ${firstName} عزیز!\n\nبرای بازی کردن باید عضو کانال ما بشی.\n\n۱️⃣ روی «عضویت در کانال» بزن و عضو شو\n۲️⃣ برگرد و «عضو شدم، بررسی کن» رو بزن ✅`,
+        forceJoinKeyboard(payload)
+      );
+    }
+
+    sendWelcome(chatId, firstName, payload);
   });
 
-  bot.on('callback_query', (callbackQuery) => {
+  bot.on('callback_query', async (callbackQuery) => {
     const chatId = callbackQuery.message.chat.id;
-    if (callbackQuery.data === 'help') {
+    const data = callbackQuery.data || '';
+
+    if (data === 'help') {
       bot.sendMessage(chatId, `📖 **راهنمای بازی پنالتی:**
 
 ⚽ دو بازیکن آنلاین مقابل هم. هرکدام ۵ ضربه.
@@ -96,8 +155,23 @@ try {
 🎯 **پنالتی‌زن:** گوشه دروازه رو انتخاب کن.
 🧤 **دروازه‌بان:** حدس بزن توپ کجا میره و شیرجه بزن.
 
-🏆 بعد از ۱۰ ضربه، هرکی گل بیشتری زده برنده‌ست!`);
+🏆 بعد از ۱۰ ضربه، هرکی گل بیشتری زده برنده‌ست!`, { parse_mode: 'Markdown' });
+      return bot.answerCallbackQuery(callbackQuery.id);
     }
+
+    if (data.startsWith('check_join')) {
+      const payload = data.split('|')[1] || null;
+      const isMember = await checkMembership(callbackQuery.from.id);
+      if (isMember) {
+        await bot.answerCallbackQuery(callbackQuery.id);
+        return sendWelcome(chatId, callbackQuery.from.first_name || 'بازیکن', payload);
+      }
+      return bot.answerCallbackQuery(callbackQuery.id, {
+        text: '❌ هنوز عضو کانال نشدی! اول عضو شو، بعد دوباره امتحان کن.',
+        show_alert: true
+      });
+    }
+
     bot.answerCallbackQuery(callbackQuery.id);
   });
 
@@ -106,6 +180,32 @@ try {
   });
 } catch (e) {
   console.error('Bot failed to start:', e.message);
+}
+
+// چک عضویت برای ورود از WebApp (که کسی از /start رد نشه)
+const membershipCacheWeb = new Map();
+
+function checkMembershipWeb(tgId) {
+  return new Promise((resolve) => {
+    if (FORCE_CHANNEL === 'off' || !bot || !tgId) return resolve(true);
+    const key = String(tgId);
+    const cached = membershipCacheWeb.get(key);
+    if (cached && Date.now() - cached.ts < MEMBERSHIP_CACHE_MS) return resolve(cached.ok);
+
+    const apiCall = bot.getChatMember(FORCE_CHANNEL, key).then(m => {
+      const ok = ['creator', 'administrator', 'member', 'restricted'].includes(m.status);
+      membershipCacheWeb.set(key, { ok, ts: Date.now() });
+      return ok;
+    }).catch(e => {
+      console.error('getChatMember failed (web):', e.message);
+      return true;
+    });
+
+    Promise.race([
+      apiCall,
+      new Promise(r => setTimeout(() => r(true), 3000))
+    ]).then(resolve);
+  });
 }
 
 // ===== توابع کمکی بازی =====
@@ -164,7 +264,12 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   // ۱. ساخت مسابقه جدید — فقط صاحب لینک این را می‌فرستد
-  socket.on('createRoom', ({ playerName, playerAvatar, playerTgId }) => {
+  socket.on('createRoom', async ({ playerName, playerAvatar, playerTgId }) => {
+    // 🔒 عضویت اجباری (برای ورود مستقیم از WebApp که از /start رد میشود)
+    if (!(await checkMembershipWeb(playerTgId))) {
+      return socket.emit('notMember');
+    }
+
     const roomId = 'room_' + Math.random().toString(36).substring(2, 8);
     socket.join(roomId);
 
@@ -184,7 +289,7 @@ io.on('connection', (socket) => {
   });
 
   // ۲. ورود به اتاق — فقط با roomId معتبر (لینک دعوت یا ریکانکت)
-  socket.on('joinRoom', ({ roomId, playerName, playerAvatar, playerTgId }) => {
+  socket.on('joinRoom', async ({ roomId, playerName, playerAvatar, playerTgId }) => {
     if (!roomId || typeof roomId !== 'string') return;
 
     const room = rooms[roomId];
@@ -213,7 +318,11 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // بازیکن دوم
+    // بازیکن دوم جدید — 🔒 عضویت اجباری
+    if (!(await checkMembershipWeb(playerTgId))) {
+      return socket.emit('notMember');
+    }
+
     if (room.players.length === 1) {
       room.players.push({ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۲', avatar: playerAvatar, score: 0, disconnected: false });
       room.goalieIndex = 1;
