@@ -62,12 +62,12 @@ try {
         membershipCache.set(key, { ok, ts: Date.now() });
         return ok;
       }).catch(e => {
-        // اگر ربات ادمین کانال نباشد چک ممکن نیست — بازی را نبند، فقط لاگ کن
+        // ❗ اگر ربات ادمین کانال نباشد هیچ‌کس تأیید نمیشود — قفل مثل بقیه ربات‌ها بسته می‌ماند
         console.error('getChatMember failed:', e.message);
-        return true;
+        return false;
       });
 
-      // تایم‌اوت: اگر جواب نیامد، بگذار رد شود (fail-open)
+      // تایم‌اوت: فقط وقتی API در دسترس نیست بازیکن رد شود
       Promise.race([
         apiCall,
         new Promise(r => setTimeout(() => r(true), CHECK_TIMEOUT_MS))
@@ -75,12 +75,25 @@ try {
     });
   }
 
+  // 🔒 پیام قفل عضویت — دقیقاً مثل بقیه ربات‌ها
+  function sendForceJoin(chatId, firstName, payload) {
+    return bot.sendMessage(chatId,
+      `🔒 *سلام ${firstName} عزیز*\n\nبرای شروع بازی، ابتدا در کانال زیر عضو شو:\n\n📢 ${FORCE_CHANNEL}\n\nبعد از عضویت، روی «✅ بررسی عضویت» بزن.`,
+      {
+        parse_mode: 'Markdown',
+        ...forceJoinKeyboard(payload)
+      }
+    );
+  }
+
   function forceJoinKeyboard(payload) {
+    // مثل بقیه ربات‌ها: «عضویت در نام‌کانال»
+    const chName = FORCE_CHANNEL.replace('@', '');
     return {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📢 عضویت در کانال', url: FORCE_CHANNEL_URL }],
-          [{ text: '✅ عضو شدم، بررسی کن', callback_data: `check_join${payload ? '|' + payload : ''}` }]
+          [{ text: `📢 عضویت در ${chName}`, url: FORCE_CHANNEL_URL }],
+          [{ text: '✅ بررسی عضویت', callback_data: `check_join${payload ? '|' + payload : ''}` }]
         ]
       }
     };
@@ -132,10 +145,7 @@ try {
     // 🔒 عضویت اجباری در کانال
     const isMember = await checkMembership(msg.from.id);
     if (!isMember) {
-      return bot.sendMessage(chatId,
-        `🔒 ${firstName} عزیز!\n\nبرای بازی کردن باید عضو کانال ما بشی.\n\n۱️⃣ روی «عضویت در کانال» بزن و عضو شو\n۲️⃣ برگرد و «عضو شدم، بررسی کن» رو بزن ✅`,
-        forceJoinKeyboard(payload)
-      );
+      return sendForceJoin(chatId, firstName, payload);
     }
 
     sendWelcome(chatId, firstName, payload);
@@ -178,6 +188,32 @@ try {
   bot.on('polling_error', (error) => {
     console.error('Bot polling error:', error.code);
   });
+
+  // 🔍 بررسی راه‌اندازی: آیا ربات میتواند عضویت کانال را چک کند؟
+  (async () => {
+    try {
+      const me = await bot.getMe();
+      try {
+        await bot.getChat(FORCE_CHANNEL);
+        const mine = await bot.getChatMember(FORCE_CHANNEL, me.id);
+        if (['creator', 'administrator'].includes(mine.status)) {
+          console.log(`✅ قفل عضویت فعال است — ربات ادمین ${FORCE_CHANNEL} هست`);
+        } else {
+          console.error(`⚠️ ربات عضو ${FORCE_CHANNEL} هست ولی ادمین نیست! قفل عضویت کار نمیکند.`);
+          console.error(`⚠️ راه‌حل: تنظیمات کانال → Administrators → Add Admin → @${me.username}`);
+        }
+      } catch (e) {
+        console.error('================================================');
+        console.error(`⚠️ ربات به کانال ${FORCE_CHANNEL} دسترسی ندارد!`);
+        console.error(`⚠️ قفل عضویت الان برای همه بسته است.`);
+        console.error(`⚠️ راه‌حل: در کانال → مدیریت کانال → Administrators → Add Admin → @${me.username}`);
+        console.error('================================================');
+      }
+    } catch (e) {
+      console.error('⚠️ getMe failed:', e.message);
+    }
+  })();
+
 } catch (e) {
   console.error('Bot failed to start:', e.message);
 }
@@ -198,7 +234,7 @@ function checkMembershipWeb(tgId) {
       return ok;
     }).catch(e => {
       console.error('getChatMember failed (web):', e.message);
-      return true;
+      return false;
     });
 
     Promise.race([
