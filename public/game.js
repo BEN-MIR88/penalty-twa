@@ -146,7 +146,10 @@ function backToLobby() {
 }
 
 // ۱. اگر با لینک دعوت جوین شده، مستقیم به اتاق وصل شو
+let joinRetries = 0;
+
 if (currentRoomId) {
+  subStatus.innerText = "در حال اتصال به زمین...";
   joinRoom(currentRoomId);
 }
 
@@ -232,6 +235,7 @@ if (btnRematch) {
 socket.on('roomCreated', ({ roomId, youIndex }) => {
   myIndex = youIndex;
   currentRoomId = roomId;
+  joinRetries = 0;
   persistRoom(roomId);
   const inviteUrl = `https://t.me/${BOT_USERNAME}?start=${roomId}`;
   inviteLinkInput.value = inviteUrl;
@@ -244,6 +248,7 @@ socket.on('roomCreated', ({ roomId, youIndex }) => {
 socket.on('gameStart', ({ room, youIndex }) => {
   myIndex = youIndex;
   roomState = room;
+  joinRetries = 0;
   persistRoom(room.id);
 
   lobbyScreen.classList.remove('active');
@@ -337,6 +342,7 @@ socket.on('roomRejoined', ({ room, youIndex }) => {
   myIndex = youIndex;
   roomState = room;
   currentRoomId = room.id;
+  joinRetries = 0;
   persistRoom(room.id);
 
   if (room.status === 'waiting') {
@@ -387,6 +393,15 @@ socket.on('roomClosed', () => {
 
 // ❗ لینک قدیمی/منقضی — اتاق دیگر وجود ندارد
 socket.on('roomNotFound', ({ roomId }) => {
+  // شاید سرور تازه بیدار شده و اتاق هنوز لود نشده — ۳ بار با فاصله تلاش کن
+  if (joinRetries < 3) {
+    joinRetries += 1;
+    subStatus.innerText = `در حال اتصال به زمین... (${toFa(joinRetries)}/${toFa(3)})`;
+    setTimeout(() => joinRoom(roomId), 1500);
+    return;
+  }
+
+  joinRetries = 0;
   currentRoomId = null;
   myIndex = null;
   roomState = null;
@@ -397,7 +412,7 @@ socket.on('roomNotFound', ({ roomId }) => {
   waitingSection.classList.add('hidden');
   modalEmoji.innerText = '⌛';
   modalTitle.innerText = "اتاق پیدا نشد";
-  modalDesc.innerText = "این لینک منقضی شده. یه مسابقه جدید بساز و لینک تازه بفرست!";
+  modalDesc.innerText = "این لینک منقضی شده یا صاحبش بازی رو بسته. یه مسابقه جدید بساز یا از لیست مسابقه‌های فعال بپیوند!";
   modal.classList.remove('hidden');
 });
 

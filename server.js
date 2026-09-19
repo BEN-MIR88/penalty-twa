@@ -11,16 +11,18 @@ const io = new Server(server, {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// دیتابیس موقت در حافظه (In-Memory Game Rooms)
-const rooms = {};
 
 // سیستم امتیاز و لیدربورد
 const leaderboard = require('./leaderboard');
 
+// ذخیره‌سازی اتاق‌ها — لینک‌های دعوت از ری‌استارت/خواب Render جان سالم ببرند
+const roomsPersist = require('./rooms-persist');
+const rooms = roomsPersist.loadRooms();
+
 const KICKS_PER_PLAYER = 5;        // هر بازیکن ۵ ضربه میزند
 const ROUND_ANIM_MS = 4500;        // مدت نمایش نتیجه هر ضربه
 const RECONNECT_GRACE_MS = 60000;  // فرصت برگشت بعد از قطع شدن وسط بازی
-const WAITING_GRACE_MS = 10000;    // فرصت برگشت بعد از قطع شدن در حالت انتظار (رفرش صفحه)
+const WAITING_GRACE_MS = 3 * 60 * 1000; // فرصت برگشت میزبان در حالت انتظار (۳ دقیقه — قفل صفحه/رفرش/سوییچ اپ)
 const ROOM_TTL_MS = 30 * 60 * 1000; // عمر اتاق رهاشده (پاک‌سازی اتاق‌های شبح)
 const VALID_DIRS = ['left', 'center', 'right'];
 
@@ -373,6 +375,7 @@ io.on('connection', (socket) => {
       createdAt: Date.now(),
       lastActivity: Date.now()
     };
+    roomsPersist.saveRooms(rooms);
     socket.emit('roomCreated', { roomId, youIndex: 0 });
   });
 
@@ -419,6 +422,7 @@ io.on('connection', (socket) => {
       room.isPublic = false; // از لیست عمومی حذف شود
 
       // هر بازیکن باید بدونه خودش کدوم بازیکن هست (ایندکس 0 یا 1)
+      roomsPersist.saveRooms(rooms);
       io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
       io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
     } else {
@@ -481,6 +485,7 @@ io.on('connection', (socket) => {
       });
 
       room.choices = { kicker: null, goalie: null };
+      roomsPersist.saveRooms(rooms);
 
       setTimeout(() => {
         const r = rooms[roomId];
@@ -510,8 +515,9 @@ io.on('connection', (socket) => {
               history: r.history
             });
           } catch (e) { console.error('Leaderboard error:', e.message); }
+          roomsPersist.saveRooms(rooms);
           // اتاق ۶۰ ثانیه برای بازی مجدد نگه داشته می‌شود
-          setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; }, RECONNECT_GRACE_MS);
+          setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; roomsPersist.saveRooms(rooms); }, RECONNECT_GRACE_MS);
         } else {
           nextTurn(r);
           io.to(roomId).emit('nextTurn', { room: publicRoom(r) });
@@ -534,6 +540,7 @@ io.on('connection', (socket) => {
     room.goalieIndex = 1;
     room.choices = { kicker: null, goalie: null };
     room.lastActivity = Date.now();
+    roomsPersist.saveRooms(rooms);
 
     io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
     io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
@@ -555,6 +562,7 @@ io.on('connection', (socket) => {
         const r = rooms[roomId];
         if (r && r.status === 'waiting' && r.players.every(p => p.disconnected)) {
           delete rooms[roomId];
+          roomsPersist.saveRooms(rooms);
           console.log('Room removed (host left waiting):', roomId);
         }
       }, WAITING_GRACE_MS);
@@ -580,6 +588,7 @@ io.on('connection', (socket) => {
           const r = rooms[roomId];
           if (r && r.status === 'waiting' && r.players.every(p => p.disconnected)) {
             delete rooms[roomId];
+            roomsPersist.saveRooms(rooms);
             console.log('Room removed (waiting, host gone):', roomId);
           }
         }, WAITING_GRACE_MS);
@@ -591,6 +600,7 @@ io.on('connection', (socket) => {
           if (r && r.players.some(p => p.disconnected)) {
             io.to(roomId).emit('roomClosed');
             delete rooms[roomId];
+            roomsPersist.saveRooms(rooms);
             console.log('Room removed (player never returned):', roomId);
           }
         }, RECONNECT_GRACE_MS);
@@ -617,6 +627,7 @@ setInterval(() => {
       console.log('Stale room swept:', roomId);
     }
   }
+  roomsPersist.saveRooms(rooms);
 }, 5 * 60 * 1000);
 
 // Keep-alive: چون پلن رایگان Render بعد از ۱۵ دقیقه بی‌کاری می‌خوابد،
