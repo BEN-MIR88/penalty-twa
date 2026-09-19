@@ -249,6 +249,7 @@ socket.on('gameStart', ({ room, youIndex }) => {
   myIndex = youIndex;
   roomState = room;
   joinRetries = 0;
+  hideModal(); // مطمئن شو مودال قبلی گیر نکرده
   persistRoom(room.id);
 
   lobbyScreen.classList.remove('active');
@@ -260,18 +261,63 @@ socket.on('gameStart', ({ room, youIndex }) => {
   vibrate('medium');
 });
 
+// لمس مودال = بستن (راه فرار اگه به هر دلیلی گیر کرد)
+// مودال پایان بازی (با دکمه بازی مجدد) هم با لمس بسته میشود — دکمه بازی مجدد پایین صفحه هست
+modal.addEventListener('click', hideModal);
+
 socket.on('opponentMoved', () => {
   if (!myChoice) {
     subStatus.innerText = "حریف انتخاب کرد! نوبت شماست ⚡";
   }
 });
 
-socket.on('roundResult', ({ kickerIndex, kickerChoice, goalieChoice, isGoal, scores, history, kickNumber }) => {
+// ===== مدیریت تایمرهای مودال =====
+// اگر صفحه گوشی وسط انیمیشن خاموش/روشن شود، تایمرهای مرورگر بههم میریزند
+// و مودال ممکن است گیر کند. همه تایمرها را نگه میداریم تا در رویداد بعدی لغو شوند.
+let modalShowTimer = null;
+let modalAutoHideTimer = null;
+let resultId = 0;      // شناسه نتیجه — جلوگیری از نمایش نتیجه قدیمی
+let shownResultId = 0; // آخرین نتیجهای که واقعاً نمایش داده شده
+
+function clearResultTimers() {
+  if (modalShowTimer) { clearTimeout(modalShowTimer); modalShowTimer = null; }
+  if (modalAutoHideTimer) { clearTimeout(modalAutoHideTimer); modalAutoHideTimer = null; }
+}
+
+function hideModal() {
+  clearResultTimers();
+  modal.classList.add('hidden');
+}
+
+// اگر مودالی به هر دلیلی بیش از ۸ ثانیه باز ماند (مثلاً nextTurn گم شد)،
+// خودمان وضعیت را از سرور میپرسیم و پنل را رفرش میکنیم
+function scheduleModalSafety() {
+  clearResultTimers();
+  const thisResult = ++resultId;
+  modalAutoHideTimer = setTimeout(() => {
+    modalAutoHideTimer = null;
+    // نتیجه قدیمیتر از آخرین نمایش؟ هیچ کاری نکن
+    if (thisResult < shownResultId) return;
+    if (!modal.classList.contains('hidden')) {
+      console.warn('Modal stuck >8s — requesting state sync');
+      if (currentRoomId) joinRoom(currentRoomId); // سرور کل وضعیت را برمیگرداند
+    }
+  }, 8000);
+}
+
+socket.on('roundResult', ({ kickerIndex, kickerChoice, goalieChoice, isGoal, byTimeout, scores, history, kickNumber }) => {
   // انیمیشن شوت نسبت به دید پنالتی‌زن
   ball.className = `ball shoot-${kickerChoice}`;
   goalkeeper.className = `goalkeeper dive-${goalieChoice}`;
 
-  setTimeout(() => {
+  clearResultTimers();
+  const thisResult = ++resultId;
+
+  modalShowTimer = setTimeout(() => {
+    // نتیجه قدیمی؟ (مثلاً nextTurn زودتر رسید و صفحه ریست شده) نمایش نده
+    if (thisResult < shownResultId) return;
+    shownResultId = thisResult;
+
     flash.className = `flash ${isGoal ? 'goal' : 'save'}`;
     vibrate(isGoal ? 'heavy' : 'light');
 
@@ -284,7 +330,16 @@ socket.on('roundResult', ({ kickerIndex, kickerChoice, goalieChoice, isGoal, sco
 
     modal.classList.remove('hidden');
     const iKicked = kickerIndex === myIndex;
-    if (isGoal) {
+    if (byTimeout && !isGoal && iKicked) {
+      // من وقت نداشتم انتخاب کنم — خودکار وسط زدم
+      modalEmoji.innerText = '⏱';
+      modalTitle.innerText = "وقت تمام شد!";
+      modalDesc.innerText = "انتخاب نکردی — خودکار وسط دروازه زده شد";
+    } else if (byTimeout && !isGoal && !iKicked) {
+      modalEmoji.innerText = '🧤';
+      modalTitle.innerText = "مهـار شـــد!";
+      modalDesc.innerText = "حریف وقت نداشت — توپ وسط گرفتی 🧤";
+    } else if (isGoal) {
       modalEmoji.innerText = '⚽';
       modalTitle.innerText = "گـــل شـــد!";
       modalDesc.innerText = iKicked
@@ -297,11 +352,14 @@ socket.on('roundResult', ({ kickerIndex, kickerChoice, goalieChoice, isGoal, sco
         ? "دروازه‌بان جهت شوتت رو خوند!"
         : "آفرین! توپ رو گرفتی 🧤";
     }
+
+    scheduleModalSafety();
   }, 600);
 });
 
 socket.on('nextTurn', ({ room }) => {
-  modal.classList.add('hidden');
+  hideModal(); // هر تایمر معلق را لغو میکند — مودال دیگر گیر نمیکند
+  shownResultId = resultId;
   flash.className = 'flash';
   resetPitch();
   roomState = room;
@@ -310,6 +368,9 @@ socket.on('nextTurn', ({ room }) => {
 });
 
 socket.on('gameOver', ({ winnerIndex, scores, history }) => {
+  hideModal();
+  clearResultTimers();
+  shownResultId = resultId;
   if (roomState) roomState.status = 'finished';
   renderDots(history);
   updateScores(scores);
@@ -343,6 +404,7 @@ socket.on('roomRejoined', ({ room, youIndex }) => {
   roomState = room;
   currentRoomId = room.id;
   joinRetries = 0;
+  hideModal();
   persistRoom(room.id);
 
   if (room.status === 'waiting') {

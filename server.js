@@ -21,6 +21,7 @@ const rooms = roomsPersist.loadRooms();
 
 const KICKS_PER_PLAYER = 5;        // هر بازیکن ۵ ضربه میزند
 const ROUND_ANIM_MS = 4500;        // مدت نمایش نتیجه هر ضربه
+const TURN_TIMEOUT_MS = 15000;     // اگر بازیکنی ۱۵ ثانیه انتخاب نکرد، خودکار وسط دروازه
 const RECONNECT_GRACE_MS = 60000;  // فرصت برگشت بعد از قطع شدن وسط بازی
 const WAITING_GRACE_MS = 3 * 60 * 1000; // فرصت برگشت میزبان در حالت انتظار (۳ دقیقه — قفل صفحه/رفرش/سوییچ اپ)
 const ROOM_TTL_MS = 30 * 60 * 1000; // عمر اتاق رهاشده (پاک‌سازی اتاق‌های شبح)
@@ -348,6 +349,78 @@ function nextTurn(room) {
   room.choices = { kicker: null, goalie: null };
 }
 
+// حل یک ضربه (بعد از انتخاب هر دو یا تایم‌اوت) — انیمیشن، امتیاز، نوبت بعد یا پایان
+function resolveKick(roomId, wasTimeout = false) {
+  const room = rooms[roomId];
+  if (!room || room.status !== 'playing') return;
+
+  // اگر یکی از انتخاب‌ها غایب مانده، خودکار وسط
+  if (!room.choices.kicker) room.choices.kicker = 'center';
+  if (!room.choices.goalie) room.choices.goalie = 'center';
+
+  clearTimeout(room.turnTimer);
+
+  const kicker = room.players[room.kickerIndex];
+
+  // ⚽ قانون درست: اگه گلر همون جهتی رو که شوت شده رو انتخاب کنه، توپ گرفته میشه
+  const isGoal = room.choices.kicker !== room.choices.goalie;
+  if (isGoal) kicker.score += 1;
+
+  // تاریخچه با ایندکس بازیکن (0 یا 1) ذخیره میشه
+  room.history.push({ by: room.kickerIndex, goal: isGoal });
+
+  io.to(roomId).emit('roundResult', {
+    kickerIndex: room.kickerIndex,
+    kickerChoice: room.choices.kicker,
+    goalieChoice: room.choices.goalie,
+    isGoal: isGoal,
+    byTimeout: wasTimeout,
+    scores: [room.players[0].score, room.players[1].score],
+    history: room.history,
+    kickNumber: room.kickNumber
+  });
+
+  room.choices = { kicker: null, goalie: null };
+  roomsPersist.saveRooms(rooms);
+
+  setTimeout(() => {
+    const r = rooms[roomId];
+    if (!r || r.status !== 'playing') return;
+
+    const earlyWin = earlyWinnerIndex(r);
+    if (allKicksDone(r) || earlyWin !== null) {
+      r.status = 'finished';
+      let winnerIndex = earlyWin;
+      if (winnerIndex === null && allKicksDone(r)) {
+        if (r.players[0].score > r.players[1].score) winnerIndex = 0;
+        else if (r.players[1].score > r.players[0].score) winnerIndex = 1;
+      }
+
+      io.to(roomId).emit('gameOver', {
+        winnerIndex,
+        scores: [r.players[0].score, r.players[1].score],
+        history: r.history
+      });
+
+      // 🏆 ثبت نتیجه در لیدربورد
+      try {
+        leaderboard.recordResult({
+          winnerIndex,
+          players: r.players.map(p => ({ tgId: p.tgId, name: p.name, username: p.username })),
+          scores: [r.players[0].score, r.players[1].score],
+          history: r.history
+        });
+      } catch (e) { console.error('Leaderboard error:', e.message); }
+      roomsPersist.saveRooms(rooms);
+      // اتاق ۶۰ ثانیه برای بازی مجدد نگه داشته می‌شود
+      setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; roomsPersist.saveRooms(rooms); }, RECONNECT_GRACE_MS);
+    } else {
+      nextTurn(r);
+      io.to(roomId).emit('nextTurn', { room: publicRoom(r) });
+    }
+  }, ROUND_ANIM_MS);
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -467,62 +540,19 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('opponentMoved');
 
     if (room.choices.kicker && room.choices.goalie) {
-      // ⚽ قانون درست: اگه گلر همون جهتی رو که شوت شده رو انتخاب کنه، توپ گرفته میشه
-      const isGoal = room.choices.kicker !== room.choices.goalie;
-      if (isGoal) kicker.score += 1;
-
-      // تاریخچه با ایندکس بازیکن (0 یا 1) ذخیره میشه
-      room.history.push({ by: room.kickerIndex, goal: isGoal });
-
-      io.to(roomId).emit('roundResult', {
-        kickerIndex: room.kickerIndex,
-        kickerChoice: room.choices.kicker,
-        goalieChoice: room.choices.goalie,
-        isGoal: isGoal,
-        scores: [room.players[0].score, room.players[1].score],
-        history: room.history,
-        kickNumber: room.kickNumber
-      });
-
-      room.choices = { kicker: null, goalie: null };
-      roomsPersist.saveRooms(rooms);
-
-      setTimeout(() => {
+      resolveKick(roomId);
+    } else {
+      // ⏱ اولین بازیکن انتخاب کرد — تایمر برای بازیکن دوم
+      clearTimeout(room.turnTimer);
+      room.turnTimer = setTimeout(() => {
         const r = rooms[roomId];
         if (!r || r.status !== 'playing') return;
-
-        const earlyWin = earlyWinnerIndex(r);
-        if (allKicksDone(r) || earlyWin !== null) {
-          r.status = 'finished';
-          let winnerIndex = earlyWin;
-          if (winnerIndex === null && allKicksDone(r)) {
-            if (r.players[0].score > r.players[1].score) winnerIndex = 0;
-            else if (r.players[1].score > r.players[0].score) winnerIndex = 1;
-          }
-
-          io.to(roomId).emit('gameOver', {
-            winnerIndex,
-            scores: [r.players[0].score, r.players[1].score],
-            history: r.history
-          });
-
-          // 🏆 ثبت نتیجه در لیدربورد
-          try {
-            leaderboard.recordResult({
-              winnerIndex,
-              players: r.players.map(p => ({ tgId: p.tgId, name: p.name, username: p.username })),
-              scores: [r.players[0].score, r.players[1].score],
-              history: r.history
-            });
-          } catch (e) { console.error('Leaderboard error:', e.message); }
-          roomsPersist.saveRooms(rooms);
-          // اتاق ۶۰ ثانیه برای بازی مجدد نگه داشته می‌شود
-          setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; roomsPersist.saveRooms(rooms); }, RECONNECT_GRACE_MS);
-        } else {
-          nextTurn(r);
-          io.to(roomId).emit('nextTurn', { room: publicRoom(r) });
-        }
-      }, ROUND_ANIM_MS);
+        // بازیکن غایب خودکار وسط دروازه میزند/شیرجه میزند
+        if (!r.choices.kicker) r.choices.kicker = 'center';
+        if (!r.choices.goalie) r.choices.goalie = 'center';
+        console.log('Turn timeout — auto-resolved:', roomId);
+        resolveKick(roomId, true);
+      }, TURN_TIMEOUT_MS);
     }
   });
 
