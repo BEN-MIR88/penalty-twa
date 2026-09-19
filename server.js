@@ -35,6 +35,53 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8996508732:AAEZU1IanYRb_w5Q0_YETYDKs
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://penalty-twa.onrender.com';
 
 let bot = null;
+
+// ===== چک عضویت کانال (یکپارچه برای ربات و WebApp) =====
+// جواب مثبت ۵ دقیقه کش میشود؛ جواب منفی فقط ۱۰ ثانیه —
+// که بعد از عضویت، دکمه «بررسی عضویت» بلافاصله جواب درست بدهد.
+const membershipCache = new Map(); // tgId -> { ok, ts, apiError }
+const POSITIVE_CACHE_MS = 5 * 60 * 1000;
+const NEGATIVE_CACHE_MS = 10 * 1000;
+const CHECK_TIMEOUT_MS = 4000;
+
+function checkMembership(tgId, { fresh = false } = {}) {
+  return new Promise((resolve) => {
+    if (FORCE_CHANNEL === 'off' || !bot || !tgId) return resolve(true);
+    const key = String(tgId);
+
+    if (!fresh) {
+      const cached = membershipCache.get(key);
+      if (cached) {
+        const ttl = cached.ok ? POSITIVE_CACHE_MS : NEGATIVE_CACHE_MS;
+        if (Date.now() - cached.ts < ttl) return resolve(cached.ok);
+      }
+    }
+
+    const apiCall = bot.getChatMember(FORCE_CHANNEL, key).then(m => {
+      const ok = ['creator', 'administrator', 'member', 'restricted'].includes(m.status);
+      membershipCache.set(key, { ok, ts: Date.now(), apiError: false });
+      return ok;
+    }).catch(e => {
+      // ❗ اگر ربات ادمین کانال نباشد هیچ‌کس تأیید نمیشود — قفل مثل بقیه ربات‌ها بسته می‌ماند
+      console.error('getChatMember failed:', e.message);
+      membershipCache.set(key, { ok: false, ts: Date.now(), apiError: true });
+      return false;
+    });
+
+    // تایم‌اوت: فقط وقتی API در دسترس نیست بازیکن رد شود (fail-open)
+    Promise.race([
+      apiCall,
+      new Promise(r => setTimeout(() => r(true), CHECK_TIMEOUT_MS))
+    ]).then(resolve);
+  });
+}
+
+// آیا آخرین چک این کاربر به خطای API خورده؟ (یعنی ربات ادمین کانال نیست)
+function lastCheckHadApiError(tgId) {
+  const c = membershipCache.get(String(tgId));
+  return !!(c && c.apiError);
+}
+
 try {
   bot = new TelegramBot(BOT_TOKEN, { polling: true });
   console.log('🤖 Telegram Bot is running...');
@@ -48,36 +95,6 @@ try {
 
   // دکمه منو همیشه نمایش داده شود (نه فقط موقع تایپ)
   bot.setChatMenuButton({ menu_button: { type: 'commands' } }).catch(() => {});
-
-  // ===== چک عضویت کانال =====
-  const membershipCache = new Map(); // tgId -> { ok, ts }
-  const MEMBERSHIP_CACHE_MS = 5 * 60 * 1000;
-  const CHECK_TIMEOUT_MS = 3000; // اگر API تلگرام کند بود، بازی را نبند (fail-open)
-
-  function checkMembership(tgId) {
-    return new Promise((resolve) => {
-      if (FORCE_CHANNEL === 'off' || !bot || !tgId) return resolve(true);
-      const key = String(tgId);
-      const cached = membershipCache.get(key);
-      if (cached && Date.now() - cached.ts < MEMBERSHIP_CACHE_MS) return resolve(cached.ok);
-
-      const apiCall = bot.getChatMember(FORCE_CHANNEL, key).then(m => {
-        const ok = ['creator', 'administrator', 'member', 'restricted'].includes(m.status);
-        membershipCache.set(key, { ok, ts: Date.now() });
-        return ok;
-      }).catch(e => {
-        // ❗ اگر ربات ادمین کانال نباشد هیچ‌کس تأیید نمیشود — قفل مثل بقیه ربات‌ها بسته می‌ماند
-        console.error('getChatMember failed:', e.message);
-        return false;
-      });
-
-      // تایم‌اوت: فقط وقتی API در دسترس نیست بازیکن رد شود
-      Promise.race([
-        apiCall,
-        new Promise(r => setTimeout(() => r(true), CHECK_TIMEOUT_MS))
-      ]).then(resolve);
-    });
-  }
 
   // 🔒 پیام قفل عضویت — دقیقاً مثل بقیه ربات‌ها
   function sendForceJoin(chatId, firstName, payload) {
@@ -148,9 +165,7 @@ try {
 
     let text;
     if (top.length === 0) {
-      text = `🏆 *جدول امتیازات*
-
-هنوز کسی امتیاز نگرفته! اولین نفر باش 💪\n\n⚽ برد = ۳ امتیاز | مساوی = ۱ امتیاز`;
+      text = `🏆 *جدول امتیازات*\n\nهنوز کسی امتیاز نگرفته! اولین نفر باش 💪\n\n⚽ برد = ۳ امتیاز | مساوی = ۱ امتیاز`;
     } else {
       const medals = ['🥇', '🥈', '🥉'];
       const lines = top.map((p, i) => {
@@ -158,8 +173,7 @@ try {
         const uname = p.username ? ` @${p.username}` : '';
         return `${rank} ${p.name}${uname}\n        ${toFa(p.points)} امتیاز | ${toFa(p.wins)} برد | ${toFa(p.goals)} گل`;
       });
-      text = `🏆 *جدول امتیازات*
-\n${lines.join('\n')}\n\n⚽ برد = ۳ | مساوی = ۱`;
+      text = `🏆 *جدول امتیازات*\n\n${lines.join('\n')}\n\n⚽ برد = ۳ | مساوی = ۱`;
     }
 
     return bot.sendMessage(chatId, text, {
@@ -223,10 +237,20 @@ try {
 
     if (data.startsWith('check_join')) {
       const payload = data.split('|')[1] || null;
-      const isMember = await checkMembership(callbackQuery.from.id);
+      // fresh=true: کش منفی را نادیده بگیر — کاربر همین الان عضو شده
+      const isMember = await checkMembership(callbackQuery.from.id, { fresh: true });
+
       if (isMember) {
         await bot.answerCallbackQuery(callbackQuery.id);
         return sendWelcome(chatId, callbackQuery.from.first_name || 'بازیکن', payload);
+      }
+
+      // تفکیک دو حالت: واقعاً عضو نشده یا ربات ادمین کانال نیست
+      if (lastCheckHadApiError(callbackQuery.from.id)) {
+        return bot.answerCallbackQuery(callbackQuery.id, {
+          text: '⚠️ ربات فعلاً نمیتواند عضویت را بررسی کند. مطمئن شو ربات ادمین کانال است و دوباره امتحان کن.',
+          show_alert: true
+        });
       }
       return bot.answerCallbackQuery(callbackQuery.id, {
         text: '❌ هنوز عضو کانال نشدی! اول عضو شو، بعد دوباره امتحان کن.',
@@ -268,32 +292,6 @@ try {
 
 } catch (e) {
   console.error('Bot failed to start:', e.message);
-}
-
-// چک عضویت برای ورود از WebApp (که کسی از /start رد نشه)
-const membershipCacheWeb = new Map();
-
-function checkMembershipWeb(tgId) {
-  return new Promise((resolve) => {
-    if (FORCE_CHANNEL === 'off' || !bot || !tgId) return resolve(true);
-    const key = String(tgId);
-    const cached = membershipCacheWeb.get(key);
-    if (cached && Date.now() - cached.ts < MEMBERSHIP_CACHE_MS) return resolve(cached.ok);
-
-    const apiCall = bot.getChatMember(FORCE_CHANNEL, key).then(m => {
-      const ok = ['creator', 'administrator', 'member', 'restricted'].includes(m.status);
-      membershipCacheWeb.set(key, { ok, ts: Date.now() });
-      return ok;
-    }).catch(e => {
-      console.error('getChatMember failed (web):', e.message);
-      return false;
-    });
-
-    Promise.race([
-      apiCall,
-      new Promise(r => setTimeout(() => r(true), 3000))
-    ]).then(resolve);
-  });
 }
 
 // ===== توابع کمکی بازی =====
@@ -354,7 +352,7 @@ io.on('connection', (socket) => {
   // ۱. ساخت مسابقه جدید — فقط صاحب لینک این را می‌فرستد
   socket.on('createRoom', async ({ playerName, playerAvatar, playerTgId, playerUsername, isPublic }) => {
     // 🔒 عضویت اجباری (برای ورود مستقیم از WebApp که از /start رد میشود)
-    if (!(await checkMembershipWeb(playerTgId))) {
+    if (!(await checkMembership(playerTgId))) {
       return socket.emit('notMember');
     }
 
@@ -409,7 +407,7 @@ io.on('connection', (socket) => {
     }
 
     // بازیکن دوم جدید — 🔒 عضویت اجباری
-    if (!(await checkMembershipWeb(playerTgId))) {
+    if (!(await checkMembership(playerTgId))) {
       return socket.emit('notMember');
     }
 
