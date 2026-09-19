@@ -12,6 +12,53 @@ const user = tgUser || {
   id: Math.floor(Math.random() * 100000),
   first_name: 'کاربر تستی'
 };
+const myUsername = tgUser?.username || null;
+
+// ===== لیست مسابقه‌های عمومی =====
+const publicList = document.getElementById('public-rooms');
+const publicListItems = document.getElementById('public-rooms-items');
+let publicListTimer = null;
+
+function requestPublicRooms() {
+  socket.emit('listPublicRooms');
+}
+
+socket.on('publicRoomsList', ({ rooms }) => {
+  if (!publicList || !publicListItems) return;
+
+  if (!rooms.length) {
+    publicList.classList.add('hidden');
+    return;
+  }
+
+  publicList.classList.remove('hidden');
+  publicListItems.innerHTML = '';
+
+  rooms.forEach(r => {
+    const item = document.createElement('button');
+    item.className = 'public-room-item';
+    const mins = Math.max(0, Math.floor((Date.now() - r.createdAt) / 60000));
+    item.innerHTML = `<span class="pr-avatar">${(r.hostName || '؟').charAt(0)}</span>
+      <span class="pr-info"><span class="pr-name"></span><span class="pr-time">${toFa(mins)} دقیقه پیش</span></span>
+      <span class="pr-join">ورود ⚽</span>`;
+    item.querySelector('.pr-name').innerText = r.hostName;
+    item.addEventListener('click', () => {
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+      currentRoomId = r.roomId;
+      persistRoom(r.roomId);
+      createSection.classList.add('hidden');
+      joinRoom(r.roomId);
+    });
+    publicListItems.appendChild(item);
+  });
+});
+
+// شروع رفرش دوره‌ای لیست وقتی لابی فعال است
+setInterval(() => {
+  if (lobbyScreen.classList.contains('active') && socket.connected) {
+    requestPublicRooms();
+  }
+}, 5000);
 
 // گرفتن roomId از پارامتر URL
 const urlParams = new URLSearchParams(window.location.search);
@@ -108,7 +155,8 @@ function joinRoom(roomId) {
     roomId: roomId,
     playerName: user.first_name,
     playerAvatar: user.photo_url,
-    playerTgId: String(user.id)
+    playerTgId: String(user.id),
+    playerUsername: myUsername
   });
 }
 
@@ -119,11 +167,13 @@ btnCreate.addEventListener('click', () => {
   }
   createSection.classList.add('hidden');
   waitingSection.classList.remove('hidden');
-  // roomId را سرور میسازد و در roomCreated برمی‌گرداند
+  // roomId را سرور میسازد و در roomCreated برمی‌گرداند — مسابقه عمومی است
   socket.emit('createRoom', {
     playerName: user.first_name,
     playerAvatar: user.photo_url,
-    playerTgId: String(user.id)
+    playerTgId: String(user.id),
+    playerUsername: myUsername,
+    isPublic: true
   });
 });
 
@@ -186,6 +236,8 @@ socket.on('roomCreated', ({ roomId, youIndex }) => {
   const inviteUrl = `https://t.me/${BOT_USERNAME}?start=${roomId}`;
   inviteLinkInput.value = inviteUrl;
   subStatus.innerText = '';
+  // اتاق من از لیست عمومی حذف شود چون منتظرم
+  requestPublicRooms();
 });
 
 // شروع بازی (برای هر بازیکن جدا فرستاده میشه)

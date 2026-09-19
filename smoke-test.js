@@ -24,10 +24,21 @@ async function run() {
 
   // ۱. ساخت اتاق با createRoom
   host.on('roomCreated', d => { roomId = d.roomId; });
-  host.emit('createRoom', { playerName: 'Ali', playerTgId: '111' });
+  host.emit('createRoom', { playerName: 'Ali', playerTgId: '111', isPublic: true });
   await wait(300);
   if (!roomId) { console.log('❌ roomCreated نگرفت!'); process.exit(1); }
   console.log('✅ اتاق ساخته شد:', roomId);
+
+  // لیست عمومی باید اتاق را نشان دهد
+  let publicList = null;
+  guest.on('publicRoomsList', d => { publicList = d.rooms; });
+  guest.emit('listPublicRooms');
+  await wait(300);
+  if (!publicList || publicList.length !== 1 || publicList[0].roomId !== roomId) {
+    console.log('❌ لیست عمومی غلط است:', publicList);
+    process.exit(1);
+  }
+  console.log('✅ لیست عمومی اتاق را نشان میدهد:', publicList[0].hostName);
 
   // ۲. بازیکن دوم با joinRoom بیاد — نباید اتاق شبح بسازد
   guest.emit('joinRoom', { roomId, playerName: 'Reza', playerTgId: '222' });

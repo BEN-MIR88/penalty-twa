@@ -14,6 +14,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // دیتابیس موقت در حافظه (In-Memory Game Rooms)
 const rooms = {};
 
+// سیستم امتیاز و لیدربورد
+const leaderboard = require('./leaderboard');
+
 const KICKS_PER_PLAYER = 5;        // هر بازیکن ۵ ضربه میزند
 const ROUND_ANIM_MS = 4500;        // مدت نمایش نتیجه هر ضربه
 const RECONNECT_GRACE_MS = 60000;  // فرصت برگشت بعد از قطع شدن وسط بازی
@@ -39,6 +42,7 @@ try {
   // ⌨️ منوی همیشگی: /start همیشه پایین صفحه کنار input دیده میشود
   bot.setMyCommands([
     { command: 'start', description: '⚽ شروع بازی' },
+    { command: 'top', description: '🏆 جدول امتیازات' },
     { command: 'help', description: '📖 راهنمای بازی' }
   ]).then(() => console.log('⌨️ Bot commands set')).catch(e => console.error('setMyCommands:', e.message));
 
@@ -120,18 +124,57 @@ try {
 
 🎮 **نحوه بازی:**
 • یک مسابقه جدید بساز و لینکش رو برای دوستت بفرست
+• یا از لیست مسابقه‌های عمومی، حریف پیدا کن
 • هر بازیکن ۵ ضربه میزنه (شوت و دروازه‌بانی یکی‌یکی)
-• کی بیشترین گل رو بزنه برنده‌ست! 🏆`;
+• برد = ۳ امتیاز، مساوی = ۱ امتیاز 🏆`;
 
     return bot.sendMessage(chatId, welcomeMessage, {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '🎮 شروع بازی', web_app: { url: WEB_APP_URL } }],
-          [{ text: '📖 راهنمای بازی', callback_data: 'help' }]
+          [
+            { text: '🏆 جدول امتیازات', callback_data: 'top' },
+            { text: '📖 راهنما', callback_data: 'help' }
+          ]
         ]
       }
     });
+  }
+
+  // 🏆 متن جدول امتیازات
+  function sendTop(chatId, firstName) {
+    const top = leaderboard.topPlayers(10);
+
+    let text;
+    if (top.length === 0) {
+      text = `🏆 *جدول امتیازات*
+
+هنوز کسی امتیاز نگرفته! اولین نفر باش 💪\n\n⚽ برد = ۳ امتیاز | مساوی = ۱ امتیاز`;
+    } else {
+      const medals = ['🥇', '🥈', '🥉'];
+      const lines = top.map((p, i) => {
+        const rank = medals[i] || `${i + 1}.`;
+        const uname = p.username ? ` @${p.username}` : '';
+        return `${rank} ${p.name}${uname}\n        ${toFa(p.points)} امتیاز | ${toFa(p.wins)} برد | ${toFa(p.goals)} گل`;
+      });
+      text = `🏆 *جدول امتیازات*
+\n${lines.join('\n')}\n\n⚽ برد = ۳ | مساوی = ۱`;
+    }
+
+    return bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎮 بازی کن', web_app: { url: WEB_APP_URL } }]
+        ]
+      }
+    });
+  }
+
+  // تبدیل اعداد به فارسی
+  function toFa(n) {
+    return String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
   }
 
   // /start بدون payload → منو | /start room_xxx → ورود به زمین دوست
@@ -151,6 +194,11 @@ try {
     sendWelcome(chatId, firstName, payload);
   });
 
+  // /top — جدول امتیازات
+  bot.onText(/\/top/, (msg) => {
+    sendTop(msg.chat.id, msg.from.first_name || 'بازیکن');
+  });
+
   bot.on('callback_query', async (callbackQuery) => {
     const chatId = callbackQuery.message.chat.id;
     const data = callbackQuery.data || '';
@@ -165,8 +213,12 @@ try {
 🎯 **پنالتی‌زن:** گوشه دروازه رو انتخاب کن.
 🧤 **دروازه‌بان:** حدس بزن توپ کجا میره و شیرجه بزن.
 
-🏆 بعد از ۱۰ ضربه، هرکی گل بیشتری زده برنده‌ست!`, { parse_mode: 'Markdown' });
+🏆 برد = ۳ امتیاز، مساوی = ۱ امتیاز. جدول امتیازات با /top!`, { parse_mode: 'Markdown' });
       return bot.answerCallbackQuery(callbackQuery.id);
+    }
+
+    if (data === 'top') {
+      return sendTop(chatId, callbackQuery.from.first_name || 'بازیکن').then(() => bot.answerCallbackQuery(callbackQuery.id));
     }
 
     if (data.startsWith('check_join')) {
@@ -300,7 +352,7 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   // ۱. ساخت مسابقه جدید — فقط صاحب لینک این را می‌فرستد
-  socket.on('createRoom', async ({ playerName, playerAvatar, playerTgId }) => {
+  socket.on('createRoom', async ({ playerName, playerAvatar, playerTgId, playerUsername, isPublic }) => {
     // 🔒 عضویت اجباری (برای ورود مستقیم از WebApp که از /start رد میشود)
     if (!(await checkMembershipWeb(playerTgId))) {
       return socket.emit('notMember');
@@ -311,7 +363,7 @@ io.on('connection', (socket) => {
 
     rooms[roomId] = {
       id: roomId,
-      players: [{ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۱', avatar: playerAvatar, score: 0, disconnected: false }],
+      players: [{ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۱', avatar: playerAvatar, username: playerUsername || null, score: 0, disconnected: false }],
       kickerIndex: 0,
       goalieIndex: null,
       choices: { kicker: null, goalie: null },
@@ -319,13 +371,15 @@ io.on('connection', (socket) => {
       kickNumber: 1,
       history: [],
       status: 'waiting',
+      isPublic: !!isPublic,   // مسابقه عمومی → در لیست لابی نمایش داده میشود
+      createdAt: Date.now(),
       lastActivity: Date.now()
     };
     socket.emit('roomCreated', { roomId, youIndex: 0 });
   });
 
-  // ۲. ورود به اتاق — فقط با roomId معتبر (لینک دعوت یا ریکانکت)
-  socket.on('joinRoom', async ({ roomId, playerName, playerAvatar, playerTgId }) => {
+  // ۲. ورود به اتاق — فقط با roomId معتبر (لینک دعوت، لیست عمومی یا ریکانکت)
+  socket.on('joinRoom', async ({ roomId, playerName, playerAvatar, playerTgId, playerUsername }) => {
     if (!roomId || typeof roomId !== 'string') return;
 
     const room = rooms[roomId];
@@ -360,10 +414,11 @@ io.on('connection', (socket) => {
     }
 
     if (room.players.length === 1) {
-      room.players.push({ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۲', avatar: playerAvatar, score: 0, disconnected: false });
+      room.players.push({ id: socket.id, tgId: playerTgId != null ? String(playerTgId) : null, name: playerName || 'بازیکن ۲', avatar: playerAvatar, username: playerUsername || null, score: 0, disconnected: false });
       room.goalieIndex = 1;
       room.status = 'playing';
       room.kickerIndex = 0;
+      room.isPublic = false; // از لیست عمومی حذف شود
 
       // هر بازیکن باید بدونه خودش کدوم بازیکن هست (ایندکس 0 یا 1)
       io.to(room.players[0].id).emit('gameStart', { room: publicRoom(room), youIndex: 0 });
@@ -373,7 +428,21 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ۳. حرکت (شوت یا شیرجه)
+  // ۳. لیست مسابقه‌های عمومی در انتظار حریف
+  socket.on('listPublicRooms', () => {
+    const list = Object.values(rooms)
+      .filter(r => r.status === 'waiting' && r.isPublic && !r.players.every(p => p.disconnected))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 15)
+      .map(r => ({
+        roomId: r.id,
+        hostName: r.players[0].name,
+        createdAt: r.createdAt
+      }));
+    socket.emit('publicRoomsList', { rooms: list });
+  });
+
+  // ۴. حرکت (شوت یا شیرجه)
   socket.on('makeMove', ({ roomId, direction }) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'playing') return;
@@ -433,6 +502,16 @@ io.on('connection', (socket) => {
             scores: [r.players[0].score, r.players[1].score],
             history: r.history
           });
+
+          // 🏆 ثبت نتیجه در لیدربورد
+          try {
+            leaderboard.recordResult({
+              winnerIndex,
+              players: r.players.map(p => ({ tgId: p.tgId, name: p.name, username: p.username })),
+              scores: [r.players[0].score, r.players[1].score],
+              history: r.history
+            });
+          } catch (e) { console.error('Leaderboard error:', e.message); }
           // اتاق ۶۰ ثانیه برای بازی مجدد نگه داشته می‌شود
           setTimeout(() => { if (rooms[roomId] && rooms[roomId].status === 'finished') delete rooms[roomId]; }, RECONNECT_GRACE_MS);
         } else {
@@ -443,7 +522,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ۴. بازی مجدد
+  // ۵. بازی مجدد
   socket.on('rematch', ({ roomId }) => {
     const room = rooms[roomId];
     if (!room || room.status !== 'finished') return;
@@ -462,7 +541,7 @@ io.on('connection', (socket) => {
     io.to(room.players[1].id).emit('gameStart', { room: publicRoom(room), youIndex: 1 });
   });
 
-  // ۵. خروج داوطلب (دکمه بازگشت به لابی)
+  // ۶. خروج داوطلب (دکمه بازگشت به لابی)
   socket.on('leaveRoom', ({ roomId }) => {
     const room = rooms[roomId];
     if (!room) return;
@@ -487,7 +566,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ۶. قطع شدن اتصال
+  // ۷. قطع شدن اتصال
   socket.on('disconnect', () => {
     for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
